@@ -18,23 +18,32 @@ st.write("Ativo de espelho (Mini Índice): **BOVA11** | Tempo: **5 Minutos**")
 
 @st.cache_data(ttl=300)
 def carregar_dados_teste():
-    # Pedimos 1 mês de dados para garantir que temos as 610 velas necessárias para a média longa
-    url = "https://brapi.dev/api/quote/BOVA11?range=1mo&interval=5m"
+    # Aumentámos para 3 meses para garantir milhares de velas!
+    url = "https://brapi.dev/api/quote/BOVA11?range=3mo&interval=5m"
     headers = {"Authorization": f"Bearer {BRAPI_TOKEN}"}
     
-    resp = requests.get(url, headers=headers).json()
-    if 'results' in resp:
-        hist = resp['results'][0].get('historicalDataPrice', [])
-        df = pd.DataFrame(hist)
-        df['Date'] = pd.to_datetime(df['date'], unit='s')
-        df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
-        df.set_index('Date', inplace=True)
-        return df
+    try:
+        resp = requests.get(url, headers=headers).json()
+        if 'results' in resp:
+            hist = resp['results'][0].get('historicalDataPrice', [])
+            df = pd.DataFrame(hist)
+            if not df.empty:
+                df['Date'] = pd.to_datetime(df['date'], unit='s')
+                df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+                df.set_index('Date', inplace=True)
+                return df
+    except Exception as e:
+        pass
     return pd.DataFrame()
 
 df = carregar_dados_teste()
 
 if not df.empty:
+    st.info(f"📊 Foram carregados **{len(df)}** candles de 5 minutos da base de dados da Brapi.")
+    
+    if len(df) < 610:
+        st.error("⚠️ Atenção: O histórico tem menos de 610 velas. As médias móveis não vão aparecer por falta de tempo gráfico.")
+    
     with st.spinner("A processar a matemática estrutural (Donchian + Médias)..."):
         # 1. As Médias Móveis Estruturais
         df['MA_500'] = df['Close'].rolling(window=500).mean()
@@ -45,27 +54,27 @@ if not df.empty:
         df['Donchian_Lower'] = df['Low'].rolling(window=305).min()
         df['Donchian_Mid'] = (df['Donchian_Upper'] + df['Donchian_Lower']) / 2
         
-        # Removemos o período inicial vazio (onde as médias ainda estão a ser calculadas)
-        df = df.dropna()
-        
-        # 3. Regras e Sinais (A sua Tese)
+        # 3. Regras e Sinais (Usando lógica matemática estruturada à prova de erros)
         df['Sinal'] = "Aguardar"
         df['Alerta_Fundo'] = ""
         
-        for i in range(1, len(df)):
-            # Condição de Compra: Média do Canal cruza MA 500 para cima
-            if df['Donchian_Mid'].iloc[i] > df['MA_500'].iloc[i] and df['Donchian_Mid'].iloc[i-1] <= df['MA_500'].iloc[i-1]:
-                df.iloc[i, df.columns.get_loc('Sinal')] = "🟢 COMPRA"
-                
-            # Condição de Venda: Média do Canal cruza MA 500 para baixo
-            elif df['Donchian_Mid'].iloc[i] < df['MA_500'].iloc[i] and df['Donchian_Mid'].iloc[i-1] >= df['MA_500'].iloc[i-1]:
-                df.iloc[i, df.columns.get_loc('Sinal')] = "🔴 VENDA"
-                
-            # Alerta de Toque no Fundo (A armadilha)
-            if df['Low'].iloc[i] <= df['Donchian_Lower'].iloc[i] and df['Close'].iloc[i] < df['MA_500'].iloc[i]:
-                df.iloc[i, df.columns.get_loc('Alerta_Fundo')] = "⚠️ Tocou Fundo"
+        # Variáveis do candle anterior (para detetar o cruzamento exato)
+        donch_mid_prev = df['Donchian_Mid'].shift(1)
+        ma_500_prev = df['MA_500'].shift(1)
+        
+        # Condição de Compra (Cruza para cima)
+        compra_mask = (df['Donchian_Mid'] > df['MA_500']) & (donch_mid_prev <= ma_500_prev)
+        df.loc[compra_mask, 'Sinal'] = "🟢 COMPRA"
+        
+        # Condição de Venda (Cruza para baixo)
+        venda_mask = (df['Donchian_Mid'] < df['MA_500']) & (donch_mid_prev >= ma_500_prev)
+        df.loc[venda_mask, 'Sinal'] = "🔴 VENDA"
+        
+        # Alerta de Toque no Fundo da Estrutura
+        alerta_mask = (df['Low'] <= df['Donchian_Lower']) & (df['Close'] < df['MA_500'])
+        df.loc[alerta_mask, 'Alerta_Fundo'] = "⚠️ Tocou Fundo"
 
-        # --- PLOTAGEM DO GRÁFICO (Para validação visual do padrão) ---
+        # --- PLOTAGEM DO GRÁFICO ---
         fig = go.Figure()
 
         # Preço (Candles)
@@ -78,21 +87,29 @@ if not df.empty:
         # Canal de Donchian
         fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Upper'], line=dict(color='rgba(255,255,255,0.3)', width=1, dash='dot'), name='Topo Canal'))
         fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Lower'], line=dict(color='rgba(255,255,255,0.3)', width=1, dash='dot'), name='Fundo Canal', fill='tonexty', fillcolor='rgba(128,128,128,0.1)'))
-        fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Mid'], line=dict(color='cyan', width=2), name='Média do Canal'))
+        fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Mid'], line=dict(color='cyan', width=2), name='Média Canal'))
 
-        fig.update_layout(title="Mapeamento Institucional: BOVA11 (5 Minutos)", xaxis_rangeslider_visible=False, height=600, template="plotly_dark")
+        fig.update_layout(
+            title="Mapeamento Institucional: BOVA11 (5 Minutos)", 
+            xaxis_rangeslider_visible=False, 
+            height=650, 
+            template="plotly_dark",
+            margin=dict(l=10, r=10, b=10, t=40)
+        )
         
         st.plotly_chart(fig, use_container_width=True)
 
         # --- TABELA DE SINAIS ---
         st.subheader("📋 Registro de Cruzamentos e Alertas")
+        
+        # Filtra a tabela para mostrar apenas os momentos em que algo aconteceu
         df_sinais = df[(df['Sinal'] != "Aguardar") | (df['Alerta_Fundo'] != "")].copy()
         
         if not df_sinais.empty:
-            df_sinais = df_sinais.sort_index(ascending=False).head(20) # Mostra os últimos 20 eventos
+            df_sinais = df_sinais.sort_index(ascending=False).head(20) # Mostra os 20 alertas mais recentes
             df_mostrar = df_sinais[['Close', 'MA_500', 'Donchian_Mid', 'Donchian_Lower', 'Sinal', 'Alerta_Fundo']].round(2)
             st.dataframe(df_mostrar, use_container_width=True)
         else:
-            st.info("Nenhum sinal ou alerta acionado no período analisado.")
+            st.warning("O histórico foi carregado, mas nenhum cruzamento ocorreu neste período.")
 else:
-    st.error("Erro ao carregar dados. Verifique a API.")
+    st.error("Nenhum dado foi retornado. Verifique a chave da API ou a conexão com a Brapi.")
