@@ -4,8 +4,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Backtest Donchian Avançado", layout="wide")
-st.title("🔬 Laboratório Institucional: Donchian (305) & Análise de Extremidades")
+st.set_page_config(page_title="Laboratório Donchian Institucional", layout="wide")
+st.title("🔬 Laboratório Institucional: Donchian (305) & Diagnóstico de Momento")
 
 # Acesso ao cofre do Streamlit
 try:
@@ -56,12 +56,12 @@ def carregar_dados_teste(ticker, range_val, token):
 df = carregar_dados_teste(ativo_escolhido, range_api, BRAPI_TOKEN)
 
 if not df.empty:
-    st.info(f"📊 Foram carregados **{len(df)}** candles de 5 minutos para o ativo {ativo_escolhido}.")
+    st.info(f"📊 Foram carregados **{len(df)}** candles de 5 minutos para o ativo {ativo_escolhido} (Última vela: {df.index[-1].strftime('%d/%m/%Y %H:%M')}).")
     
     if len(df) < 610:
-        st.warning(f"⚠️ Atenção: O histórico tem apenas {len(df)} velas. A média móvel de 610 períodos precisa de mais dados para aparecer.")
+        st.warning(f"⚠️ Atenção: O histórico tem apenas {len(df)} velas. A média móvel de 610 períodos precisa de mais dados. Selecione '1 Mês' ou '3 Meses'.")
     
-    with st.spinner("A processar a matemática estrutural (Donchian, Médias e Extremidades)..."):
+    with st.spinner("A processar a matemática estrutural..."):
         # 1. As Médias Móveis Estruturais
         df['MA_500'] = df['Close'].rolling(window=500).mean()
         df['MA_610'] = df['Close'].rolling(window=610).mean()
@@ -71,19 +71,14 @@ if not df.empty:
         df['Donchian_Lower'] = df['Low'].rolling(window=305).min()
         df['Donchian_Mid'] = (df['Donchian_Upper'] + df['Donchian_Lower']) / 2
         
-        # 3. Análise de Extremidades do Canal (Novas Máximas e Mínimas)
-        # Compara o topo/fundo atual com o de 10 candles atrás para ver a inclinação das extremidades
+        # 3. Análise de Extremidades do Canal (Insumo para Novas Máximas e Mínimas)
         df['Upper_Slope'] = df['Donchian_Upper'].diff(10)
         df['Lower_Slope'] = df['Donchian_Lower'].diff(10)
         
         df['Estado_Canal'] = "Lateral / Compressão ⚖️"
-        # Se o topo sobe e o fundo também sobe -> Expansão de Alta
         exp_alta = (df['Upper_Slope'] > 0) & (df['Lower_Slope'] > 0)
-        # Se o topo desce e o fundo também desce -> Expansão de Baixa
         exp_baixa = (df['Upper_Slope'] < 0) & (df['Lower_Slope'] < 0)
-        # Se o canal está a abrir (topo sobe, fundo desce) -> Alargamento de Volatilidade
         alargamento = (df['Upper_Slope'] > 0) & (df['Lower_Slope'] < 0)
-        # Se o canal está a fechar (topo desce, fundo sobe) -> Estreitamento / Squeeze
         estreitamento = (df['Upper_Slope'] < 0) & (df['Lower_Slope'] > 0)
         
         df.loc[exp_alta, 'Estado_Canal'] = "📈 Expansão de Alta (Novas Máximas)"
@@ -91,25 +86,61 @@ if not df.empty:
         df.loc[alargamento, 'Estado_Canal'] = "🌊 Alargamento de Volatilidade"
         df.loc[estreitamento, 'Estado_Canal'] = "🤏 Estreitamento (Squeeze)"
 
-        # 4. Regras e Sinais
+        # 4. Regras, Sinais e Diagnóstico do Momento Atual
         df['Sinal'] = "Aguardar"
         df['Alerta_Fundo'] = ""
+        df['Alerta_Topo'] = ""
         
         donch_mid_prev = df['Donchian_Mid'].shift(1)
         ma_500_prev = df['MA_500'].shift(1)
         
         compra_mask = (df['Donchian_Mid'] > df['MA_500']) & (donch_mid_prev <= ma_500_prev)
-        df.loc[compra_mask, 'Sinal'] = "🟢 COMPRA"
+        df.loc[compra_mask, 'Sinal'] = "🟢 CRUZAMENTO COMPRA"
         
         venda_mask = (df['Donchian_Mid'] < df['MA_500']) & (donch_mid_prev >= ma_500_prev)
-        df.loc[venda_mask, 'Sinal'] = "🔴 VENDA"
+        df.loc[venda_mask, 'Sinal'] = "🔴 CRUZAMENTO VENDA"
         
-        alerta_mask = (df['Low'] <= df['Donchian_Lower']) & (df['Close'] < df['MA_500'])
-        df.loc[alerta_mask, 'Alerta_Fundo'] = "⚠️ Tocou Fundo"
+        alerta_fundo_mask = (df['Low'] <= df['Donchian_Lower']) & (df['Close'] < df['MA_500'])
+        df.loc[alerta_fundo_mask, 'Alerta_Fundo'] = "⚠️ Tocou Fundo / Alerta Exaustão"
 
-        # --- MÉTRICA DO MOMENTO ATUAL (Última vela) ---
-        ultimo_estado = df['Estado_Canal'].iloc[-1]
-        st.metric(label="🧭 Diagnóstico Atual da Estrutura do Canal (Donchian 305)", value=ultimo_estado)
+        alerta_topo_mask = (df['High'] >= df['Donchian_Upper']) & (df['Close'] > df['MA_500'])
+        df.loc[alerta_topo_mask, 'Alerta_Topo'] = "🎯 Tocou Topo / Alvo Atingido"
+
+        # --- PAINEL DE DIAGNÓSTICO DO MOMENTO ATUAL (Última Vela) ---
+        ult_close = df['Close'].iloc[-1]
+        ult_ma500 = df['MA_500'].iloc[-1]
+        ult_ma610 = df['MA_610'].iloc[-1]
+        ult_mid = df['Donchian_Mid'].iloc[-1]
+        ult_estado = df['Estado_Canal'].iloc[-1]
+        
+        # Lógica de Alinhamento e Momento
+        medias_alinhadas_alta = (ult_mid > ult_ma500) and (ult_ma500 > ult_ma610)
+        medias_alinhadas_baixa = (ult_mid < ult_ma500) and (ult_ma500 < ult_ma610)
+
+        st.markdown("### 🎯 Diagnóstico do Momento Atual (Último Candle)")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric(label="Dinâmica do Canal (Donchian)", value=ult_estado)
+            
+        with col2:
+            if medias_alinhadas_alta:
+                st.metric(label="Alinhamento Estrutural", value="🟢 Altista Perfeito (Média > 500 > 610)")
+            elif medias_alinhadas_baixa:
+                st.metric(label="Alinhamento Estrutural", value="🔴 Baixista Perfeito (Média < 500 < 610)")
+            else:
+                st.metric(label="Alinhamento Estrutural", value="⚖️ Transição / Emaranhado")
+                
+        with col3:
+            if ult_close > ult_ma500 and "Expansão de Alta" in ult_estado:
+                st.metric(label="Leitura Tática", value="🚀 Continuidade de Alta (Novas Máximas)")
+            elif ult_close < ult_ma500 and "Expansão de Baixa" in ult_estado:
+                st.metric(label="Leitura Tática", value="🩸 Continuidade de Baixa (Novas Mínimas)")
+            else:
+                st.metric(label="Leitura Tática", value="🔍 Zona de Observação / Pullback")
+
+        st.divider()
 
         # --- PLOTAGEM DO GRÁFICO ---
         fig = go.Figure()
@@ -123,7 +154,7 @@ if not df.empty:
         fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Mid'], line=dict(color='cyan', width=2), name='Média Canal'))
 
         fig.update_layout(
-            title=f"Análise Estrutural de Extremidades: {ativo_escolhido} (5 Minutos)", 
+            title=f"Mapeamento Institucional: {ativo_escolhido} (5 Minutos)", 
             xaxis_rangeslider_visible=False, 
             height=650, 
             template="plotly_dark",
@@ -132,16 +163,16 @@ if not df.empty:
         
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- TABELA DE SINAIS E ESTADOS ---
-        st.subheader("📋 Registo de Sinais e Dinâmica do Canal")
+        # --- TABELA DE EVENTOS ---
+        st.subheader("📋 Registo de Eventos Estruturais (Cruzamentos e Toques)")
         
-        df_sinais = df[(df['Sinal'] != "Aguardar") | (df['Alerta_Fundo'] != "")].copy()
+        df_eventos = df[(df['Sinal'] != "Aguardar") | (df['Alerta_Fundo'] != "") | (df['Alerta_Topo'] != "")].copy()
         
-        if not df_sinais.empty:
-            df_sinais = df_sinais.sort_index(ascending=False).head(20)
-            df_mostrar = df_sinais[['Close', 'MA_500', 'Donchian_Mid', 'Donchian_Lower', 'Estado_Canal', 'Sinal', 'Alerta_Fundo']].round(2)
+        if not df_eventos.empty:
+            df_eventos = df_eventos.sort_index(ascending=False).head(20)
+            df_mostrar = df_eventos[['Close', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal', 'Alerta_Fundo', 'Alerta_Topo']].round(2)
             st.dataframe(df_mostrar, use_container_width=True)
         else:
-            st.warning("Nenhum cruzamento ou toque no fundo registado no intervalo selecionado.")
+            st.warning("Nenhum evento relevante registado no período selecionado.")
 else:
     st.error("Nenhum dado retornado para o ativo ou período selecionado.")
