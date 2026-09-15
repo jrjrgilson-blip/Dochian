@@ -140,15 +140,13 @@ if not df.empty:
 
         st.divider()
 
-        # --- PLOTAGEM DO GRÁFICO ---
+        # --- PLOTAGEM DO GRÁFICO (Limpo e Corrigido) ---
         fig = go.Figure()
 
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Preço"))
         fig.add_trace(go.Scatter(x=df.index, y=df['MA_500'], line=dict(color='yellow', width=2), name='MA 500'))
         fig.add_trace(go.Scatter(x=df.index, y=df['MA_610'], line=dict(color='orange', width=2), name='MA 610'))
         
-        fig.add_trace(go.Scatter(x=df.index, y=dict(color='rgba(0,255,255,0.5)', width=1, dash='dot'), name='Topo Canal')) # placeholder
-        # Correção limpa do traçado do Donchian
         fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Upper'], line=dict(color='rgba(0,255,255,0.5)', width=1, dash='dot'), name='Topo Canal'))
         fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Lower'], line=dict(color='rgba(255,0,0,0.5)', width=1, dash='dot'), name='Fundo Canal', fill='tonexty', fillcolor='rgba(128,128,128,0.1)'))
         fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Mid'], line=dict(color='cyan', width=2), name='Média Canal'))
@@ -169,7 +167,7 @@ if not df.empty:
         df_eventos = df[(df['Sinal'] != "Aguardar") | (df['Alerta_Fundo'] != "") | (df['Alerta_Topo'] != "")].copy()
         
         if not df_eventos.empty:
-            df_eventos = df_eventos.sort_index(ascending=False).head(30) # Aumentei para mostrar mais eventos
+            df_eventos = df_eventos.sort_index(ascending=False).head(30)
             df_mostrar = df_eventos[['Close', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal', 'Alerta_Fundo', 'Alerta_Topo']].round(2)
             st.dataframe(df_mostrar, use_container_width=True)
         else:
