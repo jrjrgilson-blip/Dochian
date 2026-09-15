@@ -20,15 +20,14 @@ ativo_escolhido = st.sidebar.text_input("Ativo de Leitura:", value="BOVA11").upp
 
 opcao_periodo = st.sidebar.selectbox(
     "Quantidade de Histórico (5m):", 
-    options=["5 Dias", "15 Dias", "1 Mês", "3 Meses"], 
-    index=2
+    options=["1 Mês", "3 Meses", "6 Meses (Máximo API)"], 
+    index=1
 )
 
 mapa_periodos = {
-    "5 Dias": "5d",
-    "15 Dias": "15d",
     "1 Mês": "1mo",
-    "3 Meses": "3mo"
+    "3 Meses": "3mo",
+    "6 Meses (Máximo API)": "6mo"
 }
 range_api = mapa_periodos[opcao_periodo]
 
@@ -56,10 +55,10 @@ def carregar_dados_teste(ticker, range_val, token):
 df = carregar_dados_teste(ativo_escolhido, range_api, BRAPI_TOKEN)
 
 if not df.empty:
-    st.info(f"📊 Foram carregados **{len(df)}** candles de 5 minutos para o ativo {ativo_escolhido} (Última vela: {df.index[-1].strftime('%d/%m/%Y %H:%M')}).")
+    st.info(f"📊 Foram carregados **{len(df)}** candles de 5 minutos para o ativo {ativo_escolhido} (Período: {df.index[0].strftime('%d/%m/%Y')} até {df.index[-1].strftime('%d/%m/%Y')}).")
     
     if len(df) < 610:
-        st.warning(f"⚠️ Atenção: O histórico tem apenas {len(df)} velas. A média móvel de 610 períodos precisa de mais dados. Selecione '1 Mês' ou '3 Meses'.")
+        st.warning(f"⚠️ Atenção: O histórico tem apenas {len(df)} velas. A média móvel de 610 períodos precisa de mais dados.")
     
     with st.spinner("A processar a matemática estrutural..."):
         # 1. As Médias Móveis Estruturais
@@ -71,7 +70,7 @@ if not df.empty:
         df['Donchian_Lower'] = df['Low'].rolling(window=305).min()
         df['Donchian_Mid'] = (df['Donchian_Upper'] + df['Donchian_Lower']) / 2
         
-        # 3. Análise de Extremidades do Canal (Insumo para Novas Máximas e Mínimas)
+        # 3. Análise de Extremidades do Canal
         df['Upper_Slope'] = df['Donchian_Upper'].diff(10)
         df['Lower_Slope'] = df['Donchian_Lower'].diff(10)
         
@@ -86,7 +85,7 @@ if not df.empty:
         df.loc[alargamento, 'Estado_Canal'] = "🌊 Alargamento de Volatilidade"
         df.loc[estreitamento, 'Estado_Canal'] = "🤏 Estreitamento (Squeeze)"
 
-        # 4. Regras, Sinais e Diagnóstico do Momento Atual
+        # 4. Regras, Sinais e Diagnóstico
         df['Sinal'] = "Aguardar"
         df['Alerta_Fundo'] = ""
         df['Alerta_Topo'] = ""
@@ -106,14 +105,13 @@ if not df.empty:
         alerta_topo_mask = (df['High'] >= df['Donchian_Upper']) & (df['Close'] > df['MA_500'])
         df.loc[alerta_topo_mask, 'Alerta_Topo'] = "🎯 Tocou Topo / Alvo Atingido"
 
-        # --- PAINEL DE DIAGNÓSTICO DO MOMENTO ATUAL (Última Vela) ---
+        # --- PAINEL DE DIAGNÓSTICO DO MOMENTO ATUAL ---
         ult_close = df['Close'].iloc[-1]
         ult_ma500 = df['MA_500'].iloc[-1]
         ult_ma610 = df['MA_610'].iloc[-1]
         ult_mid = df['Donchian_Mid'].iloc[-1]
         ult_estado = df['Estado_Canal'].iloc[-1]
         
-        # Lógica de Alinhamento e Momento
         medias_alinhadas_alta = (ult_mid > ult_ma500) and (ult_ma500 > ult_ma610)
         medias_alinhadas_baixa = (ult_mid < ult_ma500) and (ult_ma500 < ult_ma610)
 
@@ -126,19 +124,19 @@ if not df.empty:
             
         with col2:
             if medias_alinhadas_alta:
-                st.metric(label="Alinhamento Estrutural", value="🟢 Altista Perfeito (Média > 500 > 610)")
+                st.metric(label="Alinhamento Estrutural", value="🟢 Altista Perfeito")
             elif medias_alinhadas_baixa:
-                st.metric(label="Alinhamento Estrutural", value="🔴 Baixista Perfeito (Média < 500 < 610)")
+                st.metric(label="Alinhamento Estrutural", value="🔴 Baixista Perfeito")
             else:
                 st.metric(label="Alinhamento Estrutural", value="⚖️ Transição / Emaranhado")
                 
         with col3:
             if ult_close > ult_ma500 and "Expansão de Alta" in ult_estado:
-                st.metric(label="Leitura Tática", value="🚀 Continuidade de Alta (Novas Máximas)")
+                st.metric(label="Leitura Tática", value="🚀 Continuidade de Alta")
             elif ult_close < ult_ma500 and "Expansão de Baixa" in ult_estado:
-                st.metric(label="Leitura Tática", value="🩸 Continuidade de Baixa (Novas Mínimas)")
+                st.metric(label="Leitura Tática", value="🩸 Continuidade de Baixa")
             else:
-                st.metric(label="Leitura Tática", value="🔍 Zona de Observação / Pullback")
+                st.metric(label="Leitura Tática", value="🔍 Zona de Observação")
 
         st.divider()
 
@@ -149,6 +147,8 @@ if not df.empty:
         fig.add_trace(go.Scatter(x=df.index, y=df['MA_500'], line=dict(color='yellow', width=2), name='MA 500'))
         fig.add_trace(go.Scatter(x=df.index, y=df['MA_610'], line=dict(color='orange', width=2), name='MA 610'))
         
+        fig.add_trace(go.Scatter(x=df.index, y=dict(color='rgba(0,255,255,0.5)', width=1, dash='dot'), name='Topo Canal')) # placeholder
+        # Correção limpa do traçado do Donchian
         fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Upper'], line=dict(color='rgba(0,255,255,0.5)', width=1, dash='dot'), name='Topo Canal'))
         fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Lower'], line=dict(color='rgba(255,0,0,0.5)', width=1, dash='dot'), name='Fundo Canal', fill='tonexty', fillcolor='rgba(128,128,128,0.1)'))
         fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Mid'], line=dict(color='cyan', width=2), name='Média Canal'))
@@ -169,7 +169,7 @@ if not df.empty:
         df_eventos = df[(df['Sinal'] != "Aguardar") | (df['Alerta_Fundo'] != "") | (df['Alerta_Topo'] != "")].copy()
         
         if not df_eventos.empty:
-            df_eventos = df_eventos.sort_index(ascending=False).head(20)
+            df_eventos = df_eventos.sort_index(ascending=False).head(30) # Aumentei para mostrar mais eventos
             df_mostrar = df_eventos[['Close', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal', 'Alerta_Fundo', 'Alerta_Topo']].round(2)
             st.dataframe(df_mostrar, use_container_width=True)
         else:
