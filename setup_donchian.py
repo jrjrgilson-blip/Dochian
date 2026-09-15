@@ -21,7 +21,7 @@ ativo_escolhido = st.sidebar.text_input("Ativo de Leitura:", value="BOVA11").upp
 opcao_periodo = st.sidebar.selectbox(
     "Quantidade de Histórico (5m):", 
     options=["1 Mês", "3 Meses", "6 Meses (Máximo API)"], 
-    index=1
+    index=2
 )
 
 mapa_periodos = {
@@ -85,13 +85,13 @@ if not df.empty:
         df.loc[alargamento, 'Estado_Canal'] = "🌊 Alargamento de Volatilidade"
         df.loc[estreitamento, 'Estado_Canal'] = "🤏 Estreitamento (Squeeze)"
 
-        # 4. Regras, Sinais e Diagnóstico
+        # 4. Regras, Sinais e Diagnóstico (Com janela otimizada para capturar os pivôs)
         df['Sinal'] = "Aguardar"
         df['Alerta_Fundo'] = ""
         df['Alerta_Topo'] = ""
         
-        donch_mid_prev = df['Donchian_Mid'].shift(1)
-        ma_500_prev = df['MA_500'].shift(1)
+        donch_mid_prev = df['Donchian_Mid'].shift(3) # Janela de 3 candles para maior assertividade no cruzamento
+        ma_500_prev = df['MA_500'].shift(3)
         
         compra_mask = (df['Donchian_Mid'] > df['MA_500']) & (donch_mid_prev <= ma_500_prev)
         df.loc[compra_mask, 'Sinal'] = "🟢 CRUZAMENTO COMPRA"
@@ -100,10 +100,10 @@ if not df.empty:
         df.loc[venda_mask, 'Sinal'] = "🔴 CRUZAMENTO VENDA"
         
         alerta_fundo_mask = (df['Low'] <= df['Donchian_Lower']) & (df['Close'] < df['MA_500'])
-        df.loc[alerta_fundo_mask, 'Alerta_Fundo'] = "⚠️ Tocou Fundo / Alerta Exaustão"
+        df.loc[alerta_fundo_mask, 'Alerta_Fundo'] = "⚠️ Tocou Fundo / Exaustão"
 
         alerta_topo_mask = (df['High'] >= df['Donchian_Upper']) & (df['Close'] > df['MA_500'])
-        df.loc[alerta_topo_mask, 'Alerta_Topo'] = "🎯 Tocou Topo / Alvo Atingido"
+        df.loc[alerta_topo_mask, 'Alerta_Topo'] = "🎯 Tocou Topo / Alvo"
 
         # --- PAINEL DE DIAGNÓSTICO DO MOMENTO ATUAL ---
         ult_close = df['Close'].iloc[-1]
@@ -140,7 +140,7 @@ if not df.empty:
 
         st.divider()
 
-        # --- PLOTAGEM DO GRÁFICO (Limpo e Corrigido) ---
+        # --- PLOTAGEM DO GRÁFICO ---
         fig = go.Figure()
 
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Preço"))
@@ -161,15 +161,23 @@ if not df.empty:
         
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- TABELA DE EVENTOS ---
-        st.subheader("📋 Registo de Eventos Estruturais (Cruzamentos e Toques)")
+        # --- TABELA DE EVENTOS (Ampliada e com seletor de ordem) ---
+        st.subheader("📋 Registo Histórico de Sinais e Eventos Estruturais")
         
         df_eventos = df[(df['Sinal'] != "Aguardar") | (df['Alerta_Fundo'] != "") | (df['Alerta_Topo'] != "")].copy()
         
         if not df_eventos.empty:
-            df_eventos = df_eventos.sort_index(ascending=False).head(30)
+            # Filtro para o utilizador escolher se quer ver do mais recente ou do mais antigo
+            ordem_exibicao = st.radio("Ordenar histórico de eventos:", options=["Mais recentes primeiro", "Mais antigos primeiro"], horizontal=True)
+            
+            if ordem_exibicao == "Mais recentes primeiro":
+                df_eventos = df_eventos.sort_index(ascending=False)
+            else:
+                df_eventos = df_eventos.sort_index(ascending=True)
+                
+            # Mostramos mais linhas para abranger agosto inteiro
             df_mostrar = df_eventos[['Close', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal', 'Alerta_Fundo', 'Alerta_Topo']].round(2)
-            st.dataframe(df_mostrar, use_container_width=True)
+            st.dataframe(df_mostrar, use_container_width=True, height=400)
         else:
             st.warning("Nenhum evento relevante registado no período selecionado.")
 else:
