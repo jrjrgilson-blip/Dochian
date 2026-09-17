@@ -2,21 +2,11 @@ import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
-import streamlit.components.v1 as components
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Laboratório Donchian Institucional", layout="wide")
 
-# --- INJEÇÃO DE CSS PARA FORÇAR ALTURA DO GRÁFICO NO MÓVEL E PC ---
-st.markdown("""
-    <style>
-    iframe {
-        width: 100% !important;
-        height: 750px !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-st.title("🔬 Laboratório Institucional: Donchian (305) & TradingView")
+st.title("🔬 Laboratório Institucional: Donchian (305) & Diagnóstico")
 
 # Acesso ao cofre do Streamlit
 try:
@@ -154,34 +144,38 @@ if not df.empty:
 
         st.divider()
 
-        # --- GRÁFICO OFICIAL DO TRADINGVIEW COM FORÇAGEM CSS ---
-        st.subheader(f"📈 Gráfico Profissional TradingView: {ativo_escolhido}")
+        # --- BOTÃO DE EXPANSÃO NATIVO PARA O TRADINGVIEW ---
+        col_cabecalho, col_botao = st.columns([3, 1])
+        with col_cabecalho:
+            st.subheader(f"📈 Gráfico Interativo: {ativo_escolhido} (5m)")
+        with col_botao:
+            url_tv = f"https://br.tradingview.com/chart/?symbol=BMFBOVESPA%3A{ativo_escolhido}"
+            st.markdown(f"""
+                <a href="{url_tv}" target="_blank" style="display:inline-block;background-color:#2962FF;color:white;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:bold;text-align:center;margin-top:5px;">
+                    🖨️ Abrir Tela Cheia ↗
+                </a>
+            """, unsafe_allow_html=True)
+
+        # --- PLOTAGEM DO GRÁFICO OTIMIZADA PARA MOBILE (Plotly Dinâmico) ---
+        fig = go.Figure()
+
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Preço"))
+        fig.add_trace(go.Scatter(x=df.index, y=df['MA_500'], line=dict(color='yellow', width=2), name='MA 500'))
+        fig.add_trace(go.Scatter(x=df.index, y=df['MA_610'], line=dict(color='orange', width=2), name='MA 610'))
         
-        symbol_tv = f"BMFBOVESPA:{ativo_escolhido}"
+        fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Upper'], line=dict(color='rgba(0,255,255,0.5)', width=1, dash='dot'), name='Topo Canal'))
+        fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Lower'], line=dict(color='rgba(255,0,0,0.5)', width=1, dash='dot'), name='Fundo Canal', fill='tonexty', fillcolor='rgba(128,128,128,0.1)'))
+        fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Mid'], line=dict(color='cyan', width=2), name='Média Canal'))
+
+        fig.update_layout(
+            xaxis_rangeslider_visible=False, 
+            height=650, 
+            template="plotly_dark",
+            margin=dict(l=10, r=10, b=10, t=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
         
-        html_tradingview = f"""
-        <!-- TradingView Widget BEGIN -->
-        <div class="tradingview-widget-container" style="height:100%;width:100%">
-          <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
-          <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
-          {{
-            "autosize": true,
-            "symbol": "{symbol_tv}",
-            "interval": "5",
-            "timezone": "America/Sao_Paulo",
-            "theme": "dark",
-            "style": "1",
-            "locale": "br",
-            "allow_symbol_change": true,
-            "calendar": false,
-            "support_host": "https://www.tradingview.com"
-          }}
-          </script>
-        </div>
-        <!-- TradingView Widget END -->
-        """
-        
-        components.html(html_tradingview, height=750)
+        st.plotly_chart(fig, use_container_width=True)
 
         st.divider()
 
