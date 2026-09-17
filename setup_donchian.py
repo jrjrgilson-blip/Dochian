@@ -5,7 +5,7 @@ import numpy as np
 
 st.set_page_config(page_title="Laboratório Donchian - Scanner de Mercado", layout="wide")
 
-st.title("🔬 Scanner Institucional: Donchian (305) & Ranking de Oportunidades")
+st.title("🔬 Scanner Institucional: Donchian (305) & Amplitude de Ciclos")
 
 # Acesso ao cofre do Streamlit
 try:
@@ -107,7 +107,7 @@ def processar_indicadores(df):
     
     return df
 
-# --- MODO 1: SCANNER GERAL (RANKING DE OPORTUNIDADES) ---
+# --- MODO 1: SCANNER GERAL (RANKING) ---
 if modo_visao == "📊 Scanner Geral (Ranking)":
     st.markdown("### 🔍 Radar de Oportunidades (Ativos de Alta Liquidez)")
     st.write("A varrer o mercado em busca do estado atual de cada ativo com base no Donchian (305) e Médias (500/610)...")
@@ -116,13 +116,12 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
     
     with st.spinner("A processar indicadores de toda a watchlist..."):
         for ticker in WATCHLIST_B3:
-            df_temp = carregar_dados_ativo(ticker, range_api, BRAPI_TOKEN)
+            df_temp = carregar_dados_ativo(ticker, range_val=range_api, token=BRAPI_TOKEN)
             if not df_temp.empty and len(df_temp) >= 610:
                 df_proc = processar_indicadores(df_temp)
                 if df_proc is not None:
                     ult = df_proc.iloc[-1]
                     
-                    # Alinhamento
                     mid = ult['Donchian_Mid']
                     ma500 = ult['MA_500']
                     ma610 = ult['MA_610']
@@ -150,9 +149,9 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
     else:
         st.error("Não foi possível carregar os dados para o ranking neste momento.")
 
-# --- MODO 2: ANÁLISE INDIVIDUAL ---
+# --- MODO 2: ANÁLISE INDIVIDUAL & CÁLCULO DE AMPLITUDE ---
 else:
-    st.markdown(f"### 📈 Análise Detalhada: **{ativo_escolhido}**")
+    st.markdown(f"### 📈 Análise Detalhada & Amplitude de Ciclos: **{ativo_escolhido}**")
     
     df = carregar_dados_ativo(ativo_escolhido, range_api, BRAPI_TOKEN)
     
@@ -207,20 +206,39 @@ else:
                     </a>
                 """, unsafe_allow_html=True)
 
-            # Tabela de Eventos Detalhada para o Ativo Escolhido
-            st.subheader("📋 Registo Histórico de Sinais e Eventos Estruturais")
+            # --- TABELA DE EVENTOS COM CÁLCULO DE AMPLITUDE ENTRE SINAIS ---
+            st.subheader("📋 Registo Histórico de Sinais e Amplitude Percentual")
+            
             df_eventos = df[(df['Sinal'] != "Aguardar") | (df['Alerta_Fundo'] != "") | (df['Alerta_Topo'] != "")].copy()
             
             if not df_eventos.empty:
+                # Filtrar apenas os cruzamentos formais de Compra e Venda para calcular a amplitude do ciclo
+                df_cruzamentos = df_eventos[df_eventos['Sinal'].isin(["🟢 CRUZAMENTO COMPRA", "🔴 CRUZAMENTO VENDA"])].copy()
+                
+                if not df_cruzamentos.empty:
+                    # Calcular a variação percentual em relação ao sinal anterior
+                    df_cruzamentos['Fecho_Anterior'] = df_cruzamentos['Close'].shift(-1) # Como está decrescente ou ordem
+                    
                 ordem_exibicao = st.radio("Ordenar histórico:", options=["Mais recentes primeiro", "Mais antigos primeiro"], horizontal=True)
+                
                 if ordem_exibicao == "Mais recentes primeiro":
                     df_eventos = df_eventos.sort_index(ascending=False)
                 else:
                     df_eventos = df_eventos.sort_index(ascending=True)
-                    
-                df_mostrar = df_eventos[['Close', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal', 'Alerta_Fundo', 'Alerta_Topo']].round(2)
+                
+                # Criar coluna de cálculo de amplitude entre o sinal atual e o sinal anterior na tabela ordenada
+                df_eventos['Preco_Anterior'] = df_eventos['Close'].shift(1)
+                df_eventos['Amplitude (%)'] = ((df_eventos['Close'] - df_eventos['Preco_Anterior']) / df_eventos['Preco_Anterior']) * 100
+                df_eventos['Amplitude (%)'] = df_eventos['Amplitude (%)'].round(2)
+                
+                # Formatar com símbolo para facilitar leitura
+                df_eventos['Amplitude (%)'] = df_eventos['Amplitude (%)'].apply(lambda x: f"+{x}%" if pd.notnull(x) and x > 0 else (f"{x}%" if pd.notnull(x) else "-"))
+
+                df_mostrar = df_eventos[['Close', 'Amplitude (%)', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal', 'Alerta_Fundo', 'Alerta_Topo']].round(2)
                 st.dataframe(df_mostrar, use_container_width=True, height=400)
+                
+                st.caption("ℹ️ *A coluna 'Amplitude (%)' mostra a variação do preço de fecho entre o sinal atual e o sinal imediatamente anterior na lista.*")
             else:
                 st.warning("Nenhum evento relevante registado no período selecionado para este ativo.")
     else:
-        st.error("Erro ao carregar dados para o ativo selecionado.")
+        st.error("Nenhum dado retornado para o ativo selecionado.")
