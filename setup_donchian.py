@@ -2,10 +2,10 @@ import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Laboratório Donchian Institucional", layout="wide")
-st.title("🔬 Laboratório Institucional: Donchian (305) & Diagnóstico de Momento")
+st.title("🔬 Laboratório Institucional: Donchian (305) & TradingView")
 
 # Acesso ao cofre do Streamlit
 try:
@@ -16,12 +16,12 @@ except:
 
 # --- PAINEL LATERAL DE CONTROLO ---
 st.sidebar.header("⚙️ Parâmetros de Visualização")
-ativo_escolhido = st.sidebar.text_input("Ativo de Leitura:", value="BOVA11").upper()
+ativo_escolhido = st.sidebar.text_input("Ativo de Leitura (Ex: BOVA11, PETR4):", value="BOVA11").upper()
 
 opcao_periodo = st.sidebar.selectbox(
     "Quantidade de Histórico (5m):", 
     options=["1 Mês", "3 Meses", "6 Meses (Máximo API)"], 
-    index=2
+    index=1
 )
 
 mapa_periodos = {
@@ -44,7 +44,10 @@ def carregar_dados_teste(ticker, range_val, token):
             hist = resp['results'][0].get('historicalDataPrice', [])
             df = pd.DataFrame(hist)
             if not df.empty:
-                df['Date'] = pd.to_datetime(df['date'], unit='s')
+                # Conversão com fuso horário correto de Brasília (GMT-3)
+                df['Date'] = pd.to_datetime(df['date'], unit='s', utc=True)
+                df['Date'] = df['Date'].dt.tz_convert('America/Sao_Paulo').dt.tz_localize(None)
+                
                 df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
                 df.set_index('Date', inplace=True)
                 return df
@@ -55,12 +58,12 @@ def carregar_dados_teste(ticker, range_val, token):
 df = carregar_dados_teste(ativo_escolhido, range_api, BRAPI_TOKEN)
 
 if not df.empty:
-    st.info(f"📊 Foram carregados **{len(df)}** candles de 5 minutos para o ativo {ativo_escolhido} (Período: {df.index[0].strftime('%d/%m/%Y')} até {df.index[-1].strftime('%d/%m/%Y')}).")
+    st.info(f"📊 Foram processados **{len(df)}** candles de 5 minutos para o ativo {ativo_escolhido} (Período: {df.index[0].strftime('%d/%m/%Y')} até {df.index[-1].strftime('%d/%m/%Y %H:%M')}).")
     
     if len(df) < 610:
         st.warning(f"⚠️ Atenção: O histórico tem apenas {len(df)} velas. A média móvel de 610 períodos precisa de mais dados.")
     
-    with st.spinner("A processar a matemática estrutural..."):
+    with st.spinner("A processar a matemática estrutural (Donchian + Médias)..."):
         # 1. As Médias Móveis Estruturais
         df['MA_500'] = df['Close'].rolling(window=500).mean()
         df['MA_610'] = df['Close'].rolling(window=610).mean()
@@ -85,12 +88,12 @@ if not df.empty:
         df.loc[alargamento, 'Estado_Canal'] = "🌊 Alargamento de Volatilidade"
         df.loc[estreitamento, 'Estado_Canal'] = "🤏 Estreitamento (Squeeze)"
 
-        # 4. Regras, Sinais e Diagnóstico (Com janela otimizada para capturar os pivôs)
+        # 4. Regras, Sinais e Diagnóstico
         df['Sinal'] = "Aguardar"
         df['Alerta_Fundo'] = ""
         df['Alerta_Topo'] = ""
         
-        donch_mid_prev = df['Donchian_Mid'].shift(3) # Janela de 3 candles para maior assertividade no cruzamento
+        donch_mid_prev = df['Donchian_Mid'].shift(3)
         ma_500_prev = df['MA_500'].shift(3)
         
         compra_mask = (df['Donchian_Mid'] > df['MA_500']) & (donch_mid_prev <= ma_500_prev)
@@ -140,34 +143,44 @@ if not df.empty:
 
         st.divider()
 
-        # --- PLOTAGEM DO GRÁFICO ---
-        fig = go.Figure()
-
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Preço"))
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA_500'], line=dict(color='yellow', width=2), name='MA 500'))
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA_610'], line=dict(color='orange', width=2), name='MA 610'))
+        # --- GRÁFICO OFICIAL DO TRADINGVIEW (WIDGET INTEGRADO) ---
+        st.subheader(f"📈 Gráfico Profissional TradingView: {ativo_escolhido}")
         
-        fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Upper'], line=dict(color='rgba(0,255,255,0.5)', width=1, dash='dot'), name='Topo Canal'))
-        fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Lower'], line=dict(color='rgba(255,0,0,0.5)', width=1, dash='dot'), name='Fundo Canal', fill='tonexty', fillcolor='rgba(128,128,128,0.1)'))
-        fig.add_trace(go.Scatter(x=df.index, y=df['Donchian_Mid'], line=dict(color='cyan', width=2), name='Média Canal'))
-
-        fig.update_layout(
-            title=f"Mapeamento Institucional: {ativo_escolhido} (5 Minutos)", 
-            xaxis_rangeslider_visible=False, 
-            height=650, 
-            template="plotly_dark",
-            margin=dict(l=10, r=10, b=10, t=40)
-        )
+        # Mapeia o ticker para o formato universal do TradingView na B3
+        symbol_tv = f"BMFBOVESPA:{ativo_escolhido}"
         
-        st.plotly_chart(fig, use_container_width=True)
+        html_tradingview = f"""
+        <!-- TradingView Widget BEGIN -->
+        <div class="tradingview-widget-container" style="height:600px;width:100%">
+          <div class="tradingview-widget-container__widget" style="height:calc(100% - 32px);width:100%"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
+          {{
+            "autosize": true,
+            "symbol": "{symbol_tv}",
+            "interval": "5",
+            "timezone": "America/Sao_Paulo",
+            "theme": "dark",
+            "style": "1",
+            "locale": "br",
+            "allow_symbol_change": false,
+            "calendar": false,
+            "support_host": "https://www.tradingview.com"
+          }}
+          </script>
+        </div>
+        <!-- TradingView Widget END -->
+        """
+        
+        components.html(html_tradingview, height=620)
 
-        # --- TABELA DE EVENTOS (Ampliada e com seletor de ordem) ---
+        st.divider()
+
+        # --- TABELA DE EVENTOS ---
         st.subheader("📋 Registo Histórico de Sinais e Eventos Estruturais")
         
         df_eventos = df[(df['Sinal'] != "Aguardar") | (df['Alerta_Fundo'] != "") | (df['Alerta_Topo'] != "")].copy()
         
         if not df_eventos.empty:
-            # Filtro para o utilizador escolher se quer ver do mais recente ou do mais antigo
             ordem_exibicao = st.radio("Ordenar histórico de eventos:", options=["Mais recentes primeiro", "Mais antigos primeiro"], horizontal=True)
             
             if ordem_exibicao == "Mais recentes primeiro":
@@ -175,7 +188,6 @@ if not df.empty:
             else:
                 df_eventos = df_eventos.sort_index(ascending=True)
                 
-            # Mostramos mais linhas para abranger agosto inteiro
             df_mostrar = df_eventos[['Close', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal', 'Alerta_Fundo', 'Alerta_Topo']].round(2)
             st.dataframe(df_mostrar, use_container_width=True, height=400)
         else:
