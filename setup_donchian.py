@@ -5,7 +5,7 @@ import numpy as np
 
 st.set_page_config(page_title="Laboratório Donchian - Scanner de Mercado", layout="wide")
 
-st.title("🔬 Scanner Institucional: Donchian (305) & Amplitude de Ciclos")
+st.title("🔬 Scanner Institucional: Donchian (305) & Ciclos")
 
 # Acesso ao cofre do Streamlit
 try:
@@ -150,9 +150,9 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
     else:
         st.error("Não foi possível carregar os dados para o ranking neste momento.")
 
-# --- MODO 2: ANÁLISE INDIVIDUAL & CÁLCULO DE AMPLITUDE DE CICLOS ---
+# --- MODO 2: ANÁLISE INDIVIDUAL & REGISTO COMPLETO ---
 else:
-    st.markdown(f"### 📈 Análise Detalhada & Ciclos de Tendência: **{ativo_escolhido}**")
+    st.markdown(f"### 📈 Análise Detalhada & Eventos: **{ativo_escolhido}**")
     
     df = carregar_dados_ativo(ativo_escolhido, range_api, BRAPI_TOKEN)
     
@@ -207,38 +207,43 @@ else:
                     </a>
                 """, unsafe_allow_html=True)
 
-            # --- TABELA DE CICLOS (CRUZAMENTOS E AMPLITUDE ACUMULADA) ---
-            st.subheader("📋 Registo de Ciclos de Tendência (Cruzamentos & Amplitude)")
+            # --- TABELA DE EVENTOS COMPLETA (Cruzamentos com Amplitude + Toques de Topo/Fundo) ---
+            st.subheader("📋 Registo Histórico de Sinais, Topos, Fundos & Amplitude")
             
-            # Isolamos estritamente os cruzamentos de Compra e Venda
-            df_ciclos = df[df['Sinal'].isin(["🟢 CRUZAMENTO COMPRA", "🔴 CRUZAMENTO VENDA"])].copy()
+            # Filtramos todas as linhas que contenham cruzamento OU toques nas extremidades
+            df_eventos = df[(df['Sinal'].isin(["🟢 CRUZAMENTO COMPRA", "🔴 CRUZAMENTO VENDA"])) | (df['Alerta_Fundo'] != "") | (df['Alerta_Topo'] != "")].copy()
             
-            if not df_ciclos.empty:
-                # Ordenar cronologicamente do mais antigo para o mais recente para calcular o acumulado do ciclo
-                df_ciclos = df_ciclos.sort_index(ascending=True)
+            if not df_eventos.empty:
+                # Ordenar cronologicamente para calcular a amplitude dos cruzamentos corretamente
+                df_eventos = df_eventos.sort_index(ascending=True)
                 
-                # Calcular a variação percentual em relação ao cruzamento anterior exato
-                df_ciclos['Preco_Anterior_Sinal'] = df_ciclos['Close'].shift(1)
-                df_ciclos['Amplitude Ciclo (%)'] = ((df_ciclos['Close'] - df_ciclos['Preco_Anterior_Sinal']) / df_ciclos['Preco_Anterior_Sinal']) * 100
-                df_ciclos['Amplitude Ciclo (%)'] = df_ciclos['Amplitude Ciclo (%)'].round(2)
+                # Criar coluna auxiliar para calcular amplitude acumulada entre cruzamentos de sinal
+                df_eventos['Preco_Anterior_Sinal'] = np.where(df_eventos['Sinal'].isin(["🟢 CRUZAMENTO COMPRA", "🔴 CRUZAMENTO VENDA"]), df_eventos['Close'].shift(1), np.nan)
                 
-                # Formatação visual da amplitude
-                df_ciclos['Amplitude Ciclo (%)'] = df_ciclos['Amplitude Ciclo (%)'].apply(
-                    lambda x: f"+{x}%" if pd.notnull(x) and x > 0 else (f"{x}%" if pd.notnull(x) else "Início do Ciclo")
+                # Preenche temporariamente para calcular apenas nos cruzamentos
+                df_cruz_temp = df_eventos[df_eventos['Sinal'].isin(["🟢 CRUZAMENTO COMPRA", "🔴 CRUZAMENTO VENDA"])].copy()
+                df_cruz_temp['Preco_Anterior_Sinal'] = df_cruz_temp['Close'].shift(1)
+                df_cruz_temp['Amplitude Ciclo (%)'] = (((df_cruz_temp['Close'] - df_cruz_temp['Preco_Anterior_Sinal']) / df_cruz_temp['Preco_Anterior_Sinal']) * 100).round(2)
+                df_cruz_temp['Amplitude Ciclo (%)'] = df_cruz_temp['Amplitude Ciclo (%)'].apply(
+                    lambda x: f"+{x}%" if pd.notnull(x) and x > 0 else (f"{x}%" if pd.notnull(x) else "-")
                 )
                 
-                # Opção de ordenação para visualização na tabela do Streamlit
-                ordem_exibicao = st.radio("Ordenar histórico de ciclos:", options=["Mais recentes primeiro", "Mais antigos primeiro"], horizontal=True)
+                # Reinsere a coluna no dataframe principal
+                df_eventos['Amplitude Ciclo (%)'] = "-"
+                df_eventos.update(df_cruz_temp[['Amplitude Ciclo (%)']])
+                
+                # Opção de ordenação para visualização
+                ordem_exibicao = st.radio("Ordenar histórico de eventos:", options=["Mais recentes primeiro", "Mais antigos primeiro"], horizontal=True)
                 if ordem_exibicao == "Mais recentes primeiro":
-                    df_ciclos = df_ciclos.sort_index(ascending=False)
+                    df_eventos = df_eventos.sort_index(ascending=False)
                 else:
-                    df_ciclos = df_ciclos.sort_index(ascending=True)
+                    df_eventos = df_eventos.sort_index(ascending=True)
                 
-                df_mostrar = df_ciclos[['Close', 'Amplitude Ciclo (%)', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal']].round(2)
-                st.dataframe(df_mostrar, use_container_width=True, height=400)
+                df_mostrar = df_eventos[['Close', 'Amplitude Ciclo (%)', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal', 'Alerta_Fundo', 'Alerta_Topo']].round(2)
+                st.dataframe(df_mostrar, use_container_width=True, height=450)
                 
-                st.caption("ℹ️ *A coluna 'Amplitude Ciclo (%)' mede a variação percentual acumulada entre o sinal de virada atual (Compra ou Venda) e o sinal de virada anterior.*")
+                st.caption("ℹ️ *A coluna 'Amplitude Ciclo (%)' calcula a variação acumulada entre cruzamentos de sinal, enquanto os alertas indicam os toques nas extremidades do Canal de Donchian.*")
             else:
-                st.warning("Nenhum cruzamento estrutural de compra/venda registado no período selecionado.")
+                st.warning("Nenhum evento relevante registado no período selecionado para este ativo.")
     else:
         st.error("Nenhum dado retornado para o ativo selecionado.")
