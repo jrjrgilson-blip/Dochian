@@ -5,6 +5,17 @@ import numpy as np
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Laboratório Donchian Institucional", layout="wide")
+
+# --- INJEÇÃO DE CSS PARA FORÇAR ALTURA DO GRÁFICO NO MÓVEL E PC ---
+st.markdown("""
+    <style>
+    iframe {
+        width: 100% !important;
+        height: 750px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("🔬 Laboratório Institucional: Donchian (305) & TradingView")
 
 # Acesso ao cofre do Streamlit
@@ -143,7 +154,7 @@ if not df.empty:
 
         st.divider()
 
-        # --- GRÁFICO OFICIAL DO TRADINGVIEW (EXPANDIDO PARA 850PX NO FRAME) ---
+        # --- GRÁFICO OFICIAL DO TRADINGVIEW COM FORÇAGEM CSS ---
         st.subheader(f"📈 Gráfico Profissional TradingView: {ativo_escolhido}")
         
         symbol_tv = f"BMFBOVESPA:{ativo_escolhido}"
@@ -170,8 +181,7 @@ if not df.empty:
         <!-- TradingView Widget END -->
         """
         
-        # Aumentado explicitamente para 850px para garantir tela ampla
-        components.html(html_tradingview, height=850)
+        components.html(html_tradingview, height=750)
 
         st.divider()
 
