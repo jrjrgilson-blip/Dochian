@@ -143,16 +143,15 @@ if not df.empty:
 
         st.divider()
 
-        # --- GRÁFICO OFICIAL DO TRADINGVIEW (WIDGET INTEGRADO) ---
+        # --- GRÁFICO OFICIAL DO TRADINGVIEW (EXPANDIDO PARA 700PX) ---
         st.subheader(f"📈 Gráfico Profissional TradingView: {ativo_escolhido}")
         
-        # Mapeia o ticker para o formato universal do TradingView na B3
         symbol_tv = f"BMFBOVESPA:{ativo_escolhido}"
         
         html_tradingview = f"""
         <!-- TradingView Widget BEGIN -->
-        <div class="tradingview-widget-container" style="height:600px;width:100%">
-          <div class="tradingview-widget-container__widget" style="height:calc(100% - 32px);width:100%"></div>
+        <div class="tradingview-widget-container" style="height:700px;width:100%">
+          <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
           {{
             "autosize": true,
@@ -162,7 +161,7 @@ if not df.empty:
             "theme": "dark",
             "style": "1",
             "locale": "br",
-            "allow_symbol_change": false,
+            "allow_symbol_change": true,
             "calendar": false,
             "support_host": "https://www.tradingview.com"
           }}
@@ -171,7 +170,8 @@ if not df.empty:
         <!-- TradingView Widget END -->
         """
         
-        components.html(html_tradingview, height=620)
+        # Altura aumentada para 720px para ocupar a tela com excelente visibilidade
+        components.html(html_tradingview, height=720)
 
         st.divider()
 
