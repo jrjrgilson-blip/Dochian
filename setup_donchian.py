@@ -2,6 +2,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import importlib
+
+# Após um git pull o Streamlit Cloud recarrega este arquivo, mas pode manter os módulos antigos em memória
+# (ImportError de função nova). Recarregar a cada execução é barato e evita isso.
+import donchian_core, donchian_graficos, donchian_backtest, donchian_relatorio
+for _m in (donchian_core, donchian_graficos, donchian_backtest, donchian_relatorio):
+    importlib.reload(_m)
 
 from donchian_core import (WATCHLIST_B3, SINAL_C, SINAL_V, HORIZONTES, carregar_brapi,
                            processar_indicadores, status_zona, resultados_eventos, resumir_validacao)
