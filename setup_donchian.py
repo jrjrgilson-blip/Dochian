@@ -65,21 +65,25 @@ stop_atr = st.sidebar.slider("Stop (× ATR de 14 candles na entrada; 0 = sem sto
 custo_lado = st.sidebar.number_input("Custo por lado (%)", 0.0, 0.5, 0.03, 0.01, format="%.2f")
 sentido = st.sidebar.radio("Sentido", ["ambos", "compra"], horizontal=True,
                            format_func=lambda s: "Compra e venda" if s == "ambos" else "Só compra")
+estrategia_foco = st.sidebar.selectbox("Estratégia em destaque (scanner, operações e relatório)", list(ESTRATEGIAS),
+                                       index=list(ESTRATEGIAS).index("canal"), format_func=lambda e: ESTRATEGIAS[e])
 PARAMS = dict(limiar_zona=limiar_zona, limiar_romp=limiar_romp, janela_zona=janela_zona, janela_incl=janela_incl)
 BT = dict(limiar_zona=limiar_zona, stop_atr=stop_atr, custo_lado=custo_lado, sentido=sentido)
 BT_CFG = (f"Stop {stop_atr:g}× ATR" if stop_atr else "Sem stop") + f" · custo {custo_lado:.2f}% por lado · " + \
          ("compra e venda" if sentido == "ambos" else "só compra")
 
 
-def tabela_backtest(ops_r, ops_c):
-    t = pd.DataFrame([resumo(ops_r, ESTRATEGIAS["rompimento"]), resumo(ops_c, ESTRATEGIAS["cruzamento"])])
+def tabela_backtest(ops_por_estrategia):
+    t = pd.DataFrame([resumo(o, ESTRATEGIAS[e]) for e, o in ops_por_estrategia.items()])
     fmt = lambda v: "—" if pd.isna(v) else (f"{v:.0f}" if float(v).is_integer() else f"{v:.2f}")
     return t.set_index("Estratégia").T.map(fmt).reset_index().rename(columns={"index": "Métrica"})
 
 
 CAPTION_BT = ("**Rompimento:** entra na abertura seguinte ao ★ e sai quando o Mid volta à zona (ou no rompimento contrário). "
               "**Todo cruzamento:** compra/vende em cada cruzamento Mid×MA500 e vira no contrário — mostra o custo de "
-              "operar a indecisão. Payoff = ganho médio ÷ perda média; fator de lucro = soma dos ganhos ÷ soma das perdas (> 1 = lucrativo). "
+              "operar a indecisão. **Canal:** entra quando o Mid passa acima (compra) ou abaixo (venda) das MA500 e MA610; o stop "
+              "acompanha o canal inferior na compra e o superior na venda, e a operação só termina quando o preço toca esse canal. "
+              "Depois espera um novo rompimento. **Canal com alvo:** igual, mas também encerra ao tocar o canal a favor. Payoff = ganho médio ÷ perda média; fator de lucro = soma dos ganhos ÷ soma das perdas (> 1 = lucrativo). "
               "Poucas operações = pouca confiança.")
 
 
@@ -174,7 +178,7 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
                     })
                     ev, base = resultados_eventos(df_proc, ticker=ticker)
                     evs.append(ev)
-                    o_r = backtest(df_proc, "rompimento", **BT)
+                    o_r = backtest(df_proc, estrategia_foco, **BT)
                     bt_linhas.append({"Ativo": ticker, **resumo(o_r)})
                     bt_ops.append(o_r)
                     bases.append(base)
@@ -189,7 +193,7 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
         st.success("✅ Varrimento concluído com sucesso!")
 
         st.divider()
-        st.subheader("📈 Backtest por operação — rompimento, por ativo")
+        st.subheader(f"📈 Backtest por operação, por ativo — {ESTRATEGIAS[estrategia_foco]}")
         tb = pd.DataFrame(bt_linhas).drop(columns=["Estratégia"]).set_index("Ativo")
         todas = [o for o in bt_ops if not o.empty]
         if todas:
@@ -290,18 +294,18 @@ else:
 
             st.divider()
             st.subheader(f"📈 Backtest por operação: {ativo_escolhido}")
-            ops_r = backtest(df, "rompimento", **BT)
-            ops_c = backtest(df, "cruzamento", **BT)
-            tab_bt = tabela_backtest(ops_r, ops_c)
+            ops_todas = {e: backtest(df, e, **BT) for e in ESTRATEGIAS}
+            ops_r = ops_todas[estrategia_foco]
+            tab_bt = tabela_backtest(ops_todas)
             col_t, col_g = st.columns([1, 1.4])
             with col_t:
                 st.dataframe(tab_bt, use_container_width=True, hide_index=True, height=520)
             with col_g:
-                st.plotly_chart(grafico_curvas({ESTRATEGIAS["rompimento"]: curva_capital(ops_r),
-                                                ESTRATEGIAS["cruzamento"]: curva_capital(ops_c)}), use_container_width=True)
+                st.plotly_chart(grafico_curvas({ESTRATEGIAS[e]: curva_capital(o) for e, o in ops_todas.items()}),
+                                use_container_width=True)
             st.caption(f"{BT_CFG}. " + CAPTION_BT)
             if not ops_r.empty:
-                with st.expander(f"Operações do rompimento ({len(ops_r)})"):
+                with st.expander(f"Operações — {ESTRATEGIAS[estrategia_foco]} ({len(ops_r)})"):
                     st.dataframe(ops_r.sort_values("Entrada", ascending=False).round(dict.fromkeys(ops_r.select_dtypes("number").columns, 2)),
                                  use_container_width=True, hide_index=True)
 

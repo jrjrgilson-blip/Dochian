@@ -284,7 +284,7 @@ zona &lt; {p['limiar_zona']:.2f} · rompimento &gt; {p['limiar_romp']:.2f} · ja
 uma entrada aleatória no mesmo sentido. {ATENCAO} = menos de 20 ocorrências (pouco confiável). Horizontes: {', '.join(f'{h} candles ({n})' for h, n in HORIZONTES.items())}.</p>
 {_tab(val)}
 <h2>6. Backtest por operação (sem alvo)</h2>
-<p class='nota'>Sinal lido no fecho, execução na abertura do candle seguinte. {html.escape(bt_cfg)}</p>
+<p class='nota'>Sinal lido no fecho, execução na abertura do candle seguinte; stops de canal executados no próprio candle (com gap, na abertura). {html.escape(bt_cfg)}. A lista de operações é da estratégia em destaque.</p>
 {_tab(bt_tab)}{_tab(_ops_fmt(bt_ops))}
 <h2>7. Kronos</h2>{_tab(kchk)}{_tab(ktab)}
 {grafico}
