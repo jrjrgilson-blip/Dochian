@@ -6,6 +6,7 @@ from pathlib import Path
 from donchian_core import (WATCHLIST_B3, SINAL_C, SINAL_V, HORIZONTES, carregar_brapi,
                            processar_indicadores, status_zona, resultados_eventos, resumir_validacao)
 from donchian_graficos import grafico_ativo, grafico_validacao
+from donchian_relatorio import gerar_relatorio_html, exportar_csv
 
 st.set_page_config(page_title="Laboratório Donchian - Scanner de Mercado", layout="wide")
 
@@ -204,6 +205,8 @@ else:
             with col4:
                 st.metric(label="Zona / Rompimento", value=status_zona(df, janela_zona))
 
+            area_relatorio = st.container()  # preenchido no fim, quando o gráfico e a validação já existem
+
             kz = colunas_kronos(ativo_escolhido, status_zona(df, janela_zona))
             if kz:
                 k = sinais_k.loc[ativo_escolhido]
@@ -227,7 +230,8 @@ else:
                 """, unsafe_allow_html=True)
 
             prev_ativo = prev_k[prev_k.ticker == ativo_escolhido] if prev_k is not None else None
-            st.plotly_chart(grafico_ativo(df, n_grafico, limiar_zona, limiar_romp, prev_ativo, ativo_escolhido),
+            fig_ativo = grafico_ativo(df, n_grafico, limiar_zona, limiar_romp, prev_ativo, ativo_escolhido)
+            st.plotly_chart(fig_ativo,
                             use_container_width=True, config={"scrollZoom": True})
             st.caption("🟨 Faixas amarelas = zona de indecisão (Mid colado na MA500). ★ = rompimento após a zona. "
                        "No painel de baixo, tracejado = limiar da zona, pontilhado = limiar do rompimento.")
@@ -236,6 +240,27 @@ else:
             st.subheader(f"🧪 Validação dos sinais: {ativo_escolhido}")
             ev, base = resultados_eventos(df, ticker=ativo_escolhido)
             mostrar_validacao(ev, base, f"{ativo_escolhido}, {opcao_periodo}")
+
+            # --- RELATÓRIO SOB DEMANDA (só é gerado ao tocar no botão) ---
+            with area_relatorio:
+                chave_rel = (ativo_escolhido, range_api, limiar_zona, limiar_romp, janela_zona, str(df.index[-1]))
+                rel = st.session_state.get("relatorio")
+                c_rel1, c_rel2, c_rel3 = st.columns([1.2, 1, 1])
+                with c_rel1:
+                    if st.button("📄 Gerar relatório de coerência", use_container_width=True):
+                        with st.spinner("A montar o relatório..."):
+                            html_rel = gerar_relatorio_html(ativo_escolhido, opcao_periodo, df, PARAMS,
+                                                            resumir_validacao(ev, base), sinais_k, fig_ativo)
+                            rel = {"chave": chave_rel, "html": html_rel.encode("utf-8"), "csv": exportar_csv(df)}
+                            st.session_state["relatorio"] = rel
+                if rel and rel["chave"] == chave_rel:
+                    nome = f"relatorio_{ativo_escolhido}_{df.index[-1]:%Y%m%d_%H%M}"
+                    with c_rel2:
+                        st.download_button("⬇️ Relatório (HTML)", rel["html"], f"{nome}.html", "text/html", use_container_width=True)
+                    with c_rel3:
+                        st.download_button("⬇️ Dados + indicadores (CSV)", rel["csv"], f"{nome}.csv", "text/csv", use_container_width=True)
+                elif rel:
+                    st.caption("Os parâmetros ou os dados mudaram desde o último relatório — gere de novo.")
 
             # --- TABELA DE EVENTOS COMPLETA (Cruzamentos com Amplitude + Toques de Topo/Fundo + Rompimentos) ---
             st.subheader("📋 Registo Histórico de Sinais, Topos, Fundos & Amplitude")
