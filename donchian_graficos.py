@@ -76,6 +76,19 @@ def grafico_ativo(df, n_candles, limiar_zona, limiar_romp, previsao=None, titulo
     return fig
 
 
+def grafico_curvas(curvas):
+    fig = go.Figure()
+    cores = ["#2962ff", "#9e9e9e", "#26a69a", "#ef5350"]
+    for (nome, s), cor in zip(curvas.items(), cores):
+        if len(s):
+            fig.add_trace(go.Scatter(x=list(s.index), y=list(s.values), name=nome, mode="lines+markers",
+                                     line=dict(color=cor, width=2, shape="hv"), marker=dict(size=5)))
+    fig.add_hline(y=0, line=dict(color="gray", width=1))
+    fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10), yaxis_title="Resultado acumulado (%)",
+                      legend=dict(orientation="h", y=1.12, x=0), hovermode="x unified")
+    return fig
+
+
 def grafico_validacao(res, h):
     r = res[res.h == h]
     fig = make_subplots(rows=2, cols=1, vertical_spacing=0.18,

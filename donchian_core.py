@@ -55,7 +55,7 @@ def _primeiro(mask):
     return mask & ~mask.shift(1, fill_value=False)
 
 
-def processar_indicadores(df, limiar_zona=0.08, limiar_romp=0.20, janela_zona=60):
+def processar_indicadores(df, limiar_zona=0.08, limiar_romp=0.20, janela_zona=60, janela_incl=10):
     if len(df) < 610:
         return None
     df = df.copy()
@@ -67,8 +67,8 @@ def processar_indicadores(df, limiar_zona=0.08, limiar_romp=0.20, janela_zona=60
     df['Donchian_Lower'] = df['Low'].rolling(window=305).min()
     df['Donchian_Mid'] = (df['Donchian_Upper'] + df['Donchian_Lower']) / 2
 
-    df['Upper_Slope'] = df['Donchian_Upper'].diff(10)
-    df['Lower_Slope'] = df['Donchian_Lower'].diff(10)
+    df['Upper_Slope'] = df['Donchian_Upper'].diff(janela_incl)
+    df['Lower_Slope'] = df['Donchian_Lower'].diff(janela_incl)
 
     df['Estado_Canal'] = "Lateral / Compressão ⚖️"
     exp_alta = (df['Upper_Slope'] > 0) & (df['Lower_Slope'] > 0)

@@ -91,6 +91,9 @@ def main(predictor=None):
     for ticker in WATCHLIST_B3:
         t0 = time.time()
         df = carregar_brapi(ticker, "1mo", token)
+        agora = pd.Timestamp.now(tz="America/Sao_Paulo").tz_localize(None)
+        if not df.empty:
+            df = df[df.index + pd.Timedelta("5min") <= agora]   # descarta o candle ainda em formação
         if len(df) < LOOKBACK + 20:
             print(f"{ticker}: dados insuficientes ({len(df)} candles), pulando")
             continue
