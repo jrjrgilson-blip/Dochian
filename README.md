@@ -24,3 +24,18 @@ Colunas no app:
 - **amplitude ÷ ATR**: > 1 indica mais volatilidade prevista que o normal.
 - **prob. alta**.
 - **🔥 Zona + expansão prevista**: o ativo está na zona e o Kronos espera expansão (≥ 1,2× o ATR).
+
+## Relatório de coerência (sob demanda)
+Na **Análise Individual**, o botão **📄 Gerar relatório de coerência** monta o relatório só quando é tocado. Depois aparecem dois downloads:
+- **HTML**, que abre no celular ou no PC e inclui:
+  - situação atual;
+  - qualidade dos dados: buracos, OHLC inconsistente, volume zerado, saltos anormais, atualidade;
+  - coerência dos sinais: whipsaw, cruzamentos repetidos, cruzamentos contra a expansão, rompimentos não confirmados;
+  - distribuição do tempo por estado do canal;
+  - validação contra entrada aleatória;
+  - checagens do Kronos;
+  - gráfico interativo;
+  - registo de eventos.
+- **CSV** com os candles e todos os indicadores (`;` e vírgula decimal, abre direto no Excel).
+
+Se os parâmetros ou os dados mudarem, o relatório anterior é invalidado e é preciso gerar de novo.

@@ -32,8 +32,13 @@ def carregar_brapi(ticker, range_val, token, interval="5m"):
             return df
         df["Date"] = pd.to_datetime(df["date"], unit="s", utc=True).dt.tz_convert("America/Sao_Paulo").dt.tz_localize(None)
         df = df.rename(columns={"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"})
-        df = df.dropna(subset=["Open", "High", "Low", "Close"]).drop_duplicates("Date").sort_values("Date")
-        return df.set_index("Date")
+        n_bruto = len(df)
+        n_nulos = int(df[["Open", "High", "Low", "Close"]].isna().any(axis=1).sum())
+        df = df.dropna(subset=["Open", "High", "Low", "Close"])
+        n_dup = int(df.duplicated("Date").sum())
+        df = df.drop_duplicates("Date").sort_values("Date").set_index("Date")
+        df.attrs.update(n_bruto=n_bruto, n_nulos=n_nulos, n_duplicados=n_dup)
+        return df
     except Exception:
         return pd.DataFrame()
 
