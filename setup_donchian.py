@@ -1,7 +1,11 @@
 import streamlit as st
-import requests
 import pandas as pd
 import numpy as np
+from pathlib import Path
+
+from donchian_core import (WATCHLIST_B3, SINAL_C, SINAL_V, HORIZONTES, carregar_brapi,
+                           processar_indicadores, status_zona, resultados_eventos, resumir_validacao)
+from donchian_graficos import grafico_ativo, grafico_validacao
 
 st.set_page_config(page_title="Laboratório Donchian - Scanner de Mercado", layout="wide")
 
@@ -10,16 +14,9 @@ st.title("🔬 Scanner Institucional: Donchian (305) & Ciclos")
 # Acesso ao cofre do Streamlit
 try:
     BRAPI_TOKEN = st.secrets["BRAPI_TOKEN"]
-except:
+except Exception:
     st.error("Chave não encontrada no secrets.")
     st.stop()
-
-# --- WATCHLIST DE ALTA LIQUIDEZ ---
-WATCHLIST_B3 = [
-    "BOVA11", "PETR4", "VALE3", "ITUB4", "BBAS3", 
-    "BBDC4", "SANB11", "USIM5", "CSNA3", "WEGE3", 
-    "ABEV3", "RENT3", "SUZB3"
-]
 
 # --- PAINEL LATERAL DE CONTROLO ---
 st.sidebar.header("⚙️ Painel de Controlo")
@@ -28,8 +25,8 @@ modo_visao = st.sidebar.radio("Modo de Operação:", options=["📊 Scanner Gera
 ativo_escolhido = st.sidebar.selectbox("Selecione o Ativo para Análise Detalhada:", options=WATCHLIST_B3, index=0)
 
 opcao_periodo = st.sidebar.selectbox(
-    "Quantidade de Histórico (5m):", 
-    options=["1 Mês", "3 Meses", "6 Meses (Máximo API)"], 
+    "Quantidade de Histórico (5m):",
+    options=["1 Mês", "3 Meses", "6 Meses (Máximo API)"],
     index=1
 )
 
@@ -40,142 +37,154 @@ mapa_periodos = {
 }
 range_api = mapa_periodos[opcao_periodo]
 
+st.sidebar.divider()
+st.sidebar.subheader("⚖️ Zona de indecisão & rompimento")
+limiar_zona = st.sidebar.slider("Zona: Mid a menos de X da MA500 (fração da largura do canal)", 0.02, 0.30, 0.08, 0.01)
+limiar_romp = st.sidebar.slider("Rompimento: distância passa de", 0.05, 0.60, 0.20, 0.01)
+janela_zona = st.sidebar.slider("Só conta rompimento se esteve na zona nos últimos N candles", 12, 300, 60, 6)
+if limiar_romp <= limiar_zona:
+    st.sidebar.warning("O limiar de rompimento deve ser maior que o da zona.")
+n_grafico = st.sidebar.slider("Candles no gráfico", 300, 6000, 1500, 100)
+horizonte_sel = st.sidebar.selectbox("Horizonte da validação", options=list(HORIZONTES), index=1,
+                                     format_func=lambda h: f"{h} candles ({HORIZONTES[h]})")
+PARAMS = dict(limiar_zona=limiar_zona, limiar_romp=limiar_romp, janela_zona=janela_zona)
+
+
 @st.cache_data(ttl=300)
 def carregar_dados_ativo(ticker, range_val, token):
-    url = f"https://brapi.dev/api/quote/{ticker}?range={range_val}&interval=5m"
-    headers = {"Authorization": f"Bearer {token}"}
-    
+    return carregar_brapi(ticker, range_val, token)
+
+
+@st.cache_data(ttl=600)
+def carregar_kronos():
+    """Previsões geradas pelo GitHub Actions (kronos_job.py). Ausentes = recurso desligado."""
+    base = Path(__file__).parent / "data"
     try:
-        resp = requests.get(url, headers=headers).json()
-        if 'results' in resp and resp['results']:
-            hist = resp['results'][0].get('historicalDataPrice', [])
-            df = pd.DataFrame(hist)
-            if not df.empty:
-                df['Date'] = pd.to_datetime(df['date'], unit='s', utc=True)
-                df['Date'] = df['Date'].dt.tz_convert('America/Sao_Paulo').dt.tz_localize(None)
-                df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
-                df.set_index('Date', inplace=True)
-                return df
-    except Exception as e:
-        pass
-    return pd.DataFrame()
+        sinais = pd.read_csv(base / "kronos_sinais.csv")
+        prev = pd.read_csv(base / "kronos_previsao.csv", parse_dates=["timestamps"])
+        return sinais.set_index("ticker"), prev
+    except Exception:
+        return None, None
 
-# Função para processar os indicadores num DataFrame
-def processar_indicadores(df):
-    if len(df) < 610:
-        return None
-        
-    df['MA_500'] = df['Close'].rolling(window=500).mean()
-    df['MA_610'] = df['Close'].rolling(window=610).mean()
-    
-    df['Donchian_Upper'] = df['High'].rolling(window=305).max()
-    df['Donchian_Lower'] = df['Low'].rolling(window=305).min()
-    df['Donchian_Mid'] = (df['Donchian_Upper'] + df['Donchian_Lower']) / 2
-    
-    df['Upper_Slope'] = df['Donchian_Upper'].diff(10)
-    df['Lower_Slope'] = df['Donchian_Lower'].diff(10)
-    
-    df['Estado_Canal'] = "Lateral / Compressão ⚖️"
-    exp_alta = (df['Upper_Slope'] > 0) & (df['Lower_Slope'] > 0)
-    exp_baixa = (df['Upper_Slope'] < 0) & (df['Lower_Slope'] < 0)
-    alargamento = (df['Upper_Slope'] > 0) & (df['Lower_Slope'] < 0)
-    estreitamento = (df['Upper_Slope'] < 0) & (df['Lower_Slope'] > 0)
-    
-    df.loc[exp_alta, 'Estado_Canal'] = "📈 Expansão de Alta"
-    df.loc[exp_baixa, 'Estado_Canal'] = "📉 Expansão de Baixa"
-    df.loc[alargamento, 'Estado_Canal'] = "🌊 Alargamento"
-    df.loc[estreitamento, 'Estado_Canal'] = "🤏 Squeeze"
 
-    df['Sinal'] = "Aguardar"
-    df['Alerta_Fundo'] = ""
-    df['Alerta_Topo'] = ""
-    
-    donch_mid_prev = df['Donchian_Mid'].shift(3)
-    ma_500_prev = df['MA_500'].shift(3)
-    
-    compra_mask = (df['Donchian_Mid'] > df['MA_500']) & (donch_mid_prev <= ma_500_prev)
-    df.loc[compra_mask, 'Sinal'] = "🟢 CRUZAMENTO COMPRA"
-    
-    venda_mask = (df['Donchian_Mid'] < df['MA_500']) & (donch_mid_prev >= ma_500_prev)
-    df.loc[venda_mask, 'Sinal'] = "🔴 CRUZAMENTO VENDA"
-    
-    alerta_fundo_mask = (df['Low'] <= df['Donchian_Lower']) & (df['Close'] < df['MA_500'])
-    df.loc[alerta_fundo_mask, 'Alerta_Fundo'] = "⚠️ Tocou Fundo / Exaustão"
+sinais_k, prev_k = carregar_kronos()
 
-    alerta_topo_mask = (df['High'] >= df['Donchian_Upper']) & (df['Close'] > df['MA_500'])
-    df.loc[alerta_topo_mask, 'Alerta_Topo'] = "🎯 Tocou Topo / Alvo"
-    
-    return df
+
+def colunas_kronos(ticker, zona_txt):
+    if sinais_k is None or ticker not in sinais_k.index:
+        return {}
+    k = sinais_k.loc[ticker]
+    alerta = "🔥 Zona + expansão prevista" if zona_txt.startswith("⚖️") and k.razao_amp_atr >= 1.2 else ""
+    return {
+        "Kronos: amplitude ÷ ATR": f"{k.razao_amp_atr:.2f}×",
+        "Kronos: prob. alta": f"{k.prob_alta:.0%}",
+        "Alerta Kronos": alerta,
+    }
+
+
+def mostrar_validacao(ev, base, titulo):
+    res = resumir_validacao(ev, base)
+    if res.empty:
+        st.info("Nenhum evento com horizonte completo para validar neste período.")
+        return
+    st.plotly_chart(grafico_validacao(res, horizonte_sel), use_container_width=True)
+    filtro = res[res.h == horizonte_sel].drop(columns=["h", "Horizonte"])
+    st.dataframe(filtro, use_container_width=True, hide_index=True)
+    with st.expander("Todos os horizontes"):
+        st.dataframe(res.drop(columns=["h"]), use_container_width=True, hide_index=True)
+    st.caption(
+        f"**{titulo}.** *Retorno* e *movimento máximo a favor* são medidos no sentido do sinal, "
+        "a partir do fecho do candle do evento. *Aleatório* = entrar no mesmo sentido em qualquer candle. "
+        "*Vantagem* > 0 de forma consistente indica que o evento acrescenta informação. "
+        "Nos toques, acerto < 50% indica **exaustão** (reversão); > 50%, continuação. "
+        "Desconfie de N pequeno (< 20)."
+    )
+
 
 # --- MODO 1: SCANNER GERAL (RANKING) ---
 if modo_visao == "📊 Scanner Geral (Ranking)":
     st.markdown("### 🔍 Radar de Oportunidades (Ativos de Alta Liquidez)")
     st.write("A varrer o mercado em busca do estado atual de cada ativo com base no Donchian (305) e Médias (500/610)...")
-    
-    resultados_scanner = []
-    
+
+    resultados_scanner, evs, bases = [], [], []
+
     with st.spinner("A processar indicadores de toda a watchlist..."):
         for ticker in WATCHLIST_B3:
             df_temp = carregar_dados_ativo(ticker, range_val=range_api, token=BRAPI_TOKEN)
             if not df_temp.empty and len(df_temp) >= 610:
-                df_proc = processar_indicadores(df_temp)
+                df_proc = processar_indicadores(df_temp, **PARAMS)
                 if df_proc is not None:
                     ult = df_proc.iloc[-1]
-                    
+
                     mid = ult['Donchian_Mid']
                     ma500 = ult['MA_500']
                     ma610 = ult['MA_610']
-                    
+
                     if mid > ma500 and ma500 > ma610:
                         alinhamento = "🟢 Altista Perfeito"
                     elif mid < ma500 and ma500 < ma610:
                         alinhamento = "🔴 Baixista Perfeito"
                     else:
                         alinhamento = "⚖️ Emaranhado / Transição"
-                        
+
+                    zona_txt = status_zona(df_proc, janela_zona)
                     resultados_scanner.append({
                         "Ativo": ticker,
                         "Fecho (R$)": round(ult['Close'], 2),
                         "Dinâmica do Canal": ult['Estado_Canal'],
                         "Alinhamento Estrutural": alinhamento,
+                        "Zona / Rompimento": zona_txt,
+                        "Dist. Mid×MA500": round(ult['Dist_Rel'], 3),
                         "Alerta Atual": ult['Alerta_Fundo'] if ult['Alerta_Fundo'] != "" else (ult['Alerta_Topo'] if ult['Alerta_Topo'] != "" else "Nenhum"),
+                        **colunas_kronos(ticker, zona_txt),
                         "Atualização": df_proc.index[-1].strftime('%d/%m %H:%M')
                     })
-                    
+                    ev, base = resultados_eventos(df_proc, ticker=ticker)
+                    evs.append(ev)
+                    bases.append(base)
+
     if resultados_scanner:
         df_ranking = pd.DataFrame(resultados_scanner)
         df_ranking = df_ranking.sort_values(by="Ativo", ascending=True)
-        st.dataframe(df_ranking, use_container_width=True, height=500)
+        st.dataframe(df_ranking, use_container_width=True, height=500, hide_index=True)
+        if sinais_k is not None:
+            st.caption(f"🤖 Kronos gerado em {sinais_k.gerado_em.iloc[0]} — previsão dos próximos "
+                       f"{int(sinais_k.pred_len.iloc[0])} candles. *Amplitude ÷ ATR* > 1 = mais volatilidade que o normal.")
         st.success("✅ Varrimento concluído com sucesso!")
+
+        st.divider()
+        st.subheader("🧪 Validação dos sinais — watchlist inteira")
+        mostrar_validacao(pd.concat(evs, ignore_index=True), pd.concat(bases, ignore_index=True),
+                          f"{len(evs)} ativos, {opcao_periodo}")
     else:
         st.error("Não foi possível carregar os dados para o ranking neste momento.")
 
 # --- MODO 2: ANÁLISE INDIVIDUAL & REGISTO COMPLETO ---
 else:
     st.markdown(f"### 📈 Análise Detalhada & Eventos: **{ativo_escolhido}**")
-    
+
     df = carregar_dados_ativo(ativo_escolhido, range_api, BRAPI_TOKEN)
-    
+
     if not df.empty:
         st.info(f"📊 Foram processados **{len(df)}** candles de 5 minutos (Período: {df.index[0].strftime('%d/%m/%Y')} até {df.index[-1].strftime('%d/%m/%Y %H:%M')}).")
-        
+
         if len(df) < 610:
             st.warning(f"⚠️ Atenção: O histórico tem apenas {len(df)} velas. A média de 610 precisa de mais dados.")
-        
-        df = processar_indicadores(df)
-        
+
+        df = processar_indicadores(df, **PARAMS)
+
         if df is not None:
             ult_close = df['Close'].iloc[-1]
             ult_ma500 = df['MA_500'].iloc[-1]
             ult_ma610 = df['MA_610'].iloc[-1]
             ult_mid = df['Donchian_Mid'].iloc[-1]
             ult_estado = df['Estado_Canal'].iloc[-1]
-            
+
             medias_alinhadas_alta = (ult_mid > ult_ma500) and (ult_ma500 > ult_ma610)
             medias_alinhadas_baixa = (ult_mid < ult_ma500) and (ult_ma500 < ult_ma610)
 
             # Cartões de Diagnóstico
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric(label="Dinâmica do Canal", value=ult_estado)
             with col2:
@@ -192,56 +201,67 @@ else:
                     st.metric(label="Leitura Tática", value="🩸 Continuidade Baixa")
                 else:
                     st.metric(label="Leitura Tática", value="🔍 Zona de Observação")
+            with col4:
+                st.metric(label="Zona / Rompimento", value=status_zona(df, janela_zona))
+
+            kz = colunas_kronos(ativo_escolhido, status_zona(df, janela_zona))
+            if kz:
+                k = sinais_k.loc[ativo_escolhido]
+                st.info(f"🤖 **Kronos** (próximos {int(k.pred_len)} candles, gerado em {k.gerado_em}): "
+                        f"amplitude prevista **{kz['Kronos: amplitude ÷ ATR']}** o ATR · prob. de alta **{kz['Kronos: prob. alta']}** · "
+                        f"prob. de romper topo/fundo do canal **{k.prob_rompe_topo:.0%} / {k.prob_rompe_fundo:.0%}** "
+                        f"{kz['Alerta Kronos']}")
 
             st.divider()
 
-            # Botão de Tela Cheia TradingView
+            # Gráfico interativo + botão de Tela Cheia TradingView
             col_cab, col_btn = st.columns([3, 1])
             with col_cab:
-                st.subheader(f"📈 Gráfico Oficial TradingView: {ativo_escolhido}")
+                st.subheader(f"📈 Gráfico Donchian & Zona de Indecisão: {ativo_escolhido}")
             with col_btn:
                 url_tv = f"https://br.tradingview.com/chart/?symbol=BMFBOVESPA%3A{ativo_escolhido}"
                 st.markdown(f"""
                     <a href="{url_tv}" target="_blank" style="display:inline-block;background-color:#2962FF;color:white;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:bold;text-align:center;margin-top:5px;">
-                        🖨️ Abrir Tela Cheia ↗
+                        🖨️ TradingView ↗
                     </a>
                 """, unsafe_allow_html=True)
 
-            # --- TABELA DE EVENTOS COMPLETA (Cruzamentos com Amplitude + Toques de Topo/Fundo) ---
+            prev_ativo = prev_k[prev_k.ticker == ativo_escolhido] if prev_k is not None else None
+            st.plotly_chart(grafico_ativo(df, n_grafico, limiar_zona, limiar_romp, prev_ativo, ativo_escolhido),
+                            use_container_width=True, config={"scrollZoom": True})
+            st.caption("🟨 Faixas amarelas = zona de indecisão (Mid colado na MA500). ★ = rompimento após a zona. "
+                       "No painel de baixo, tracejado = limiar da zona, pontilhado = limiar do rompimento.")
+
+            st.divider()
+            st.subheader(f"🧪 Validação dos sinais: {ativo_escolhido}")
+            ev, base = resultados_eventos(df, ticker=ativo_escolhido)
+            mostrar_validacao(ev, base, f"{ativo_escolhido}, {opcao_periodo}")
+
+            # --- TABELA DE EVENTOS COMPLETA (Cruzamentos com Amplitude + Toques de Topo/Fundo + Rompimentos) ---
             st.subheader("📋 Registo Histórico de Sinais, Topos, Fundos & Amplitude")
-            
-            # Filtramos todas as linhas que contenham cruzamento OU toques nas extremidades
-            df_eventos = df[(df['Sinal'].isin(["🟢 CRUZAMENTO COMPRA", "🔴 CRUZAMENTO VENDA"])) | (df['Alerta_Fundo'] != "") | (df['Alerta_Topo'] != "")].copy()
-            
+
+            df_eventos = df[(df['Sinal'].isin([SINAL_C, SINAL_V])) | (df['Alerta_Fundo'] != "") | (df['Alerta_Topo'] != "") | (df['Rompimento'] != "")].copy()
+
             if not df_eventos.empty:
-                # Ordenar cronologicamente para calcular a amplitude dos cruzamentos corretamente
                 df_eventos = df_eventos.sort_index(ascending=True)
-                
-                # Criar coluna auxiliar para calcular amplitude acumulada entre cruzamentos de sinal
-                df_eventos['Preco_Anterior_Sinal'] = np.where(df_eventos['Sinal'].isin(["🟢 CRUZAMENTO COMPRA", "🔴 CRUZAMENTO VENDA"]), df_eventos['Close'].shift(1), np.nan)
-                
-                # Preenche temporariamente para calcular apenas nos cruzamentos
-                df_cruz_temp = df_eventos[df_eventos['Sinal'].isin(["🟢 CRUZAMENTO COMPRA", "🔴 CRUZAMENTO VENDA"])].copy()
+
+                # Amplitude acumulada entre cruzamentos de sinal
+                df_cruz_temp = df_eventos[df_eventos['Sinal'].isin([SINAL_C, SINAL_V])].copy()
                 df_cruz_temp['Preco_Anterior_Sinal'] = df_cruz_temp['Close'].shift(1)
                 df_cruz_temp['Amplitude Ciclo (%)'] = (((df_cruz_temp['Close'] - df_cruz_temp['Preco_Anterior_Sinal']) / df_cruz_temp['Preco_Anterior_Sinal']) * 100).round(2)
                 df_cruz_temp['Amplitude Ciclo (%)'] = df_cruz_temp['Amplitude Ciclo (%)'].apply(
                     lambda x: f"+{x}%" if pd.notnull(x) and x > 0 else (f"{x}%" if pd.notnull(x) else "-")
                 )
-                
-                # Reinsere a coluna no dataframe principal
+
                 df_eventos['Amplitude Ciclo (%)'] = "-"
                 df_eventos.update(df_cruz_temp[['Amplitude Ciclo (%)']])
-                
-                # Opção de ordenação para visualização
+
                 ordem_exibicao = st.radio("Ordenar histórico de eventos:", options=["Mais recentes primeiro", "Mais antigos primeiro"], horizontal=True)
-                if ordem_exibicao == "Mais recentes primeiro":
-                    df_eventos = df_eventos.sort_index(ascending=False)
-                else:
-                    df_eventos = df_eventos.sort_index(ascending=True)
-                
-                df_mostrar = df_eventos[['Close', 'Amplitude Ciclo (%)', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal', 'Alerta_Fundo', 'Alerta_Topo']].round(2)
+                df_eventos = df_eventos.sort_index(ascending=(ordem_exibicao == "Mais antigos primeiro"))
+
+                df_mostrar = df_eventos[['Close', 'Amplitude Ciclo (%)', 'MA_500', 'Donchian_Mid', 'Estado_Canal', 'Sinal', 'Rompimento', 'Alerta_Fundo', 'Alerta_Topo']].round(2)
                 st.dataframe(df_mostrar, use_container_width=True, height=450)
-                
+
                 st.caption("ℹ️ *A coluna 'Amplitude Ciclo (%)' calcula a variação acumulada entre cruzamentos de sinal, enquanto os alertas indicam os toques nas extremidades do Canal de Donchian.*")
             else:
                 st.warning("Nenhum evento relevante registado no período selecionado para este ativo.")
