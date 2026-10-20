@@ -45,5 +45,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898279+github-actions[bot]@users.noreply.github.com"
+          # o main pode ter avançado durante a execução: grava os CSVs novos por cima da versão atual
+          cp -r data "$RUNNER_TEMP/novos"
+          git fetch origin main
+          git reset --hard origin/main
+          mkdir -p data && cp -r "$RUNNER_TEMP/novos/." data/
           git add data/
-          git diff --cached --quiet || (git commit -m "Kronos: previsões $(date -u +%F)" && git push)
+          git diff --cached --quiet || (git commit -m "Kronos: previsões $(date -u +%F)" && git push origin HEAD:main)
