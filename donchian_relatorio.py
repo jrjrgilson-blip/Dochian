@@ -195,12 +195,13 @@ def checar_kronos(ticker, df, sinais_k):
     k = sinais_k.loc[ticker]
     ult_k = pd.to_datetime(k.ultimo_candle)
     atraso = int((df.index > ult_k).sum())
-    _chk(c, OK if atraso <= 78 else ATENCAO, "Defasagem da previsão",
+    _chk(c, OK if atraso <= int(k.pred_len) else ATENCAO, "Defasagem da previsão",
          f"gerada em {k.gerado_em} com dados até {ult_k:%d/%m %H:%M}; {atraso} candles novos desde então"
          + (" — a previsão já ficou para trás" if atraso > int(k.pred_len) else ""))
     if ult_k in df.index:
         dif = abs(df.loc[ult_k, "Close"] / k.close - 1)
-        _chk(c, OK if dif < 0.002 else ATENCAO, "Mesmo dado na previsão e no app", f"fecho no Kronos {k.close:.2f} × app {df.loc[ult_k, 'Close']:.2f} ({dif:.2%})")
+        _chk(c, OK if dif < 0.002 else ATENCAO, "Mesmo dado na previsão e no app", f"fecho no Kronos {k.close:.2f} × app {df.loc[ult_k, 'Close']:.2f} ({dif:.2%})"
+             + (" — o Kronos usou um candle ainda em formação ou a brapi revisou o dado; a previsão partiu de um preço diferente" if dif >= 0.002 else ""))
     banda_ok = k.p10_final <= k.med_final <= k.p90_final
     _chk(c, OK if banda_ok else FALHA, "Banda P10 ≤ mediana ≤ P90", f"{k.p10_final:.2f} ≤ {k.med_final:.2f} ≤ {k.p90_final:.2f}")
     u = df.iloc[-1]
@@ -236,7 +237,7 @@ def _tab(df):
     return f"<div class='tw'>{df.to_html(index=False, escape=True, border=0, na_rep='—')}</div>"
 
 
-def gerar_relatorio_html(ticker, periodo, df, params, ev_resumo, sinais_k=None, fig=None):
+def gerar_relatorio_html(ticker, periodo, df, params, ev_resumo, sinais_k=None, fig=None, bt_tab=None, bt_ops=None, bt_cfg=""):
     agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
     dados = checar_dados(df)
     coer, estado = checar_coerencia(df, params["janela_zona"])
@@ -282,12 +283,24 @@ zona &lt; {p['limiar_zona']:.2f} · rompimento &gt; {p['limiar_romp']:.2f} · ja
 <p class='nota'>Retorno e movimento máximo medidos no sentido do sinal, a partir do fecho do candle do evento. <b>Vantagem</b> &gt; 0 = o evento supera
 uma entrada aleatória no mesmo sentido. {ATENCAO} = menos de 20 ocorrências (pouco confiável). Horizontes: {', '.join(f'{h} candles ({n})' for h, n in HORIZONTES.items())}.</p>
 {_tab(val)}
-<h2>6. Kronos</h2>{_tab(kchk)}{_tab(ktab)}
+<h2>6. Backtest por operação (sem alvo)</h2>
+<p class='nota'>Sinal lido no fecho, execução na abertura do candle seguinte. {html.escape(bt_cfg)}</p>
+{_tab(bt_tab)}{_tab(_ops_fmt(bt_ops))}
+<h2>7. Kronos</h2>{_tab(kchk)}{_tab(ktab)}
 {grafico}
-<h2>7. Registo de eventos (últimos {len(eventos)})</h2>{_tab(eventos)}
+<h2>8. Registo de eventos (últimos {len(eventos)})</h2>{_tab(eventos)}
 <p class='mut'>Relatório para análise; não é recomendação de investimento.</p>"""
     return f"""<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>Relatório {html.escape(ticker)} {agora:%d-%m-%Y}</title><style>{CSS}</style></head><body><main>{corpo}</main></body></html>"""
+
+
+def _ops_fmt(ops):
+    if ops is None or ops.empty:
+        return None
+    o = ops.sort_values("Entrada", ascending=False).head(60).copy()
+    for col in ("Entrada", "Saída"):
+        o[col] = o[col].dt.strftime("%d/%m %H:%M")
+    return o.round(2)
 
 
 def exportar_csv(df):

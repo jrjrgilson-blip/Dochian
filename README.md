@@ -39,3 +39,20 @@ Na **Análise Individual**, o botão **📄 Gerar relatório de coerência** mon
 - **CSV** com os candles e todos os indicadores (`;` e vírgula decimal, abre direto no Excel).
 
 Se os parâmetros ou os dados mudarem, o relatório anterior é invalidado e é preciso gerar de novo.
+
+## Backtest por operação (sem alvo)
+O sinal é lido no fecho do candle e executado na abertura do candle seguinte. Comparo duas estratégias:
+- **🚀 Rompimento:** entra no ★ e sai quando o Mid volta à zona ou no rompimento contrário.
+- **🔁 Todo cruzamento:** fica sempre posicionado e vira a cada cruzamento. Serve para medir o custo de operar a indecisão.
+
+Na barra lateral dá para ajustar:
+- stop em múltiplos do ATR (0 = sem stop);
+- custo por lado;
+- só compra, ou compra e venda.
+
+**Métricas:** acerto, ganho e perda médios, payoff, fator de lucro, resultado composto, drawdown e curva de capital.
+
+**Onde aparece:**
+- na Análise Individual, com a curva e a lista de operações;
+- no Scanner, uma linha por ativo mais o total;
+- no relatório.

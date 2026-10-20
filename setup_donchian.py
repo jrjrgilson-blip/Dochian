@@ -5,7 +5,8 @@ from pathlib import Path
 
 from donchian_core import (WATCHLIST_B3, SINAL_C, SINAL_V, HORIZONTES, carregar_brapi,
                            processar_indicadores, status_zona, resultados_eventos, resumir_validacao)
-from donchian_graficos import grafico_ativo, grafico_validacao
+from donchian_graficos import grafico_ativo, grafico_validacao, grafico_curvas
+from donchian_backtest import ESTRATEGIAS, backtest, resumo, curva_capital
 from donchian_relatorio import gerar_relatorio_html, exportar_csv
 
 st.set_page_config(page_title="Laboratório Donchian - Scanner de Mercado", layout="wide")
@@ -48,7 +49,31 @@ if limiar_romp <= limiar_zona:
 n_grafico = st.sidebar.slider("Candles no gráfico", 300, 6000, 1500, 100)
 horizonte_sel = st.sidebar.selectbox("Horizonte da validação", options=list(HORIZONTES), index=1,
                                      format_func=lambda h: f"{h} candles ({HORIZONTES[h]})")
-PARAMS = dict(limiar_zona=limiar_zona, limiar_romp=limiar_romp, janela_zona=janela_zona)
+janela_incl = st.sidebar.slider("Dinâmica do canal: inclinação medida em N candles", 5, 150, 10, 5,
+                                help="10 = comportamento original. Com 305 candles de canal, 50–100 dá uma leitura menos 'Lateral'.")
+
+st.sidebar.divider()
+st.sidebar.subheader("📈 Backtest por operação")
+stop_atr = st.sidebar.slider("Stop (× ATR de 14 candles na entrada; 0 = sem stop)", 0.0, 10.0, 0.0, 0.5)
+custo_lado = st.sidebar.number_input("Custo por lado (%)", 0.0, 0.5, 0.03, 0.01, format="%.2f")
+sentido = st.sidebar.radio("Sentido", ["ambos", "compra"], horizontal=True,
+                           format_func=lambda s: "Compra e venda" if s == "ambos" else "Só compra")
+PARAMS = dict(limiar_zona=limiar_zona, limiar_romp=limiar_romp, janela_zona=janela_zona, janela_incl=janela_incl)
+BT = dict(limiar_zona=limiar_zona, stop_atr=stop_atr, custo_lado=custo_lado, sentido=sentido)
+BT_CFG = (f"Stop {stop_atr:g}× ATR" if stop_atr else "Sem stop") + f" · custo {custo_lado:.2f}% por lado · " + \
+         ("compra e venda" if sentido == "ambos" else "só compra")
+
+
+def tabela_backtest(ops_r, ops_c):
+    t = pd.DataFrame([resumo(ops_r, ESTRATEGIAS["rompimento"]), resumo(ops_c, ESTRATEGIAS["cruzamento"])])
+    fmt = lambda v: "—" if pd.isna(v) else (f"{v:.0f}" if float(v).is_integer() else f"{v:.2f}")
+    return t.set_index("Estratégia").T.map(fmt).reset_index().rename(columns={"index": "Métrica"})
+
+
+CAPTION_BT = ("**Rompimento:** entra na abertura seguinte ao ★ e sai quando o Mid volta à zona (ou no rompimento contrário). "
+              "**Todo cruzamento:** compra/vende em cada cruzamento Mid×MA500 e vira no contrário — mostra o custo de "
+              "operar a indecisão. Payoff = ganho médio ÷ perda média; fator de lucro = soma dos ganhos ÷ soma das perdas (> 1 = lucrativo). "
+              "Poucas operações = pouca confiança.")
 
 
 @st.cache_data(ttl=300)
@@ -107,7 +132,7 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
     st.markdown("### 🔍 Radar de Oportunidades (Ativos de Alta Liquidez)")
     st.write("A varrer o mercado em busca do estado atual de cada ativo com base no Donchian (305) e Médias (500/610)...")
 
-    resultados_scanner, evs, bases = [], [], []
+    resultados_scanner, evs, bases, bt_linhas, bt_ops = [], [], [], [], []
 
     with st.spinner("A processar indicadores de toda a watchlist..."):
         for ticker in WATCHLIST_B3:
@@ -142,6 +167,9 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
                     })
                     ev, base = resultados_eventos(df_proc, ticker=ticker)
                     evs.append(ev)
+                    o_r = backtest(df_proc, "rompimento", **BT)
+                    bt_linhas.append({"Ativo": ticker, **resumo(o_r)})
+                    bt_ops.append(o_r)
                     bases.append(base)
 
     if resultados_scanner:
@@ -152,6 +180,18 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
             st.caption(f"🤖 Kronos gerado em {sinais_k.gerado_em.iloc[0]} — previsão dos próximos "
                        f"{int(sinais_k.pred_len.iloc[0])} candles. *Amplitude ÷ ATR* > 1 = mais volatilidade que o normal.")
         st.success("✅ Varrimento concluído com sucesso!")
+
+        st.divider()
+        st.subheader("📈 Backtest por operação — rompimento, por ativo")
+        tb = pd.DataFrame(bt_linhas).drop(columns=["Estratégia"]).set_index("Ativo")
+        todas = [o for o in bt_ops if not o.empty]
+        if todas:
+            tot = resumo(pd.concat(todas, ignore_index=True).sort_values("Saída"))
+            tot.update({"Resultado composto (%)": round(tb["Resultado composto (%)"].mean(), 2), "Drawdown máx. (%)": np.nan})
+            tot.pop("Estratégia")
+            tb.loc["TOTAL (composto = média por ativo)"] = pd.Series(tot)
+        st.dataframe(tb, use_container_width=True)
+        st.caption(f"{BT_CFG}. " + CAPTION_BT)
 
         st.divider()
         st.subheader("🧪 Validação dos sinais — watchlist inteira")
@@ -241,16 +281,34 @@ else:
             ev, base = resultados_eventos(df, ticker=ativo_escolhido)
             mostrar_validacao(ev, base, f"{ativo_escolhido}, {opcao_periodo}")
 
+            st.divider()
+            st.subheader(f"📈 Backtest por operação: {ativo_escolhido}")
+            ops_r = backtest(df, "rompimento", **BT)
+            ops_c = backtest(df, "cruzamento", **BT)
+            tab_bt = tabela_backtest(ops_r, ops_c)
+            col_t, col_g = st.columns([1, 1.4])
+            with col_t:
+                st.dataframe(tab_bt, use_container_width=True, hide_index=True, height=520)
+            with col_g:
+                st.plotly_chart(grafico_curvas({ESTRATEGIAS["rompimento"]: curva_capital(ops_r),
+                                                ESTRATEGIAS["cruzamento"]: curva_capital(ops_c)}), use_container_width=True)
+            st.caption(f"{BT_CFG}. " + CAPTION_BT)
+            if not ops_r.empty:
+                with st.expander(f"Operações do rompimento ({len(ops_r)})"):
+                    st.dataframe(ops_r.sort_values("Entrada", ascending=False).round(dict.fromkeys(ops_r.select_dtypes("number").columns, 2)),
+                                 use_container_width=True, hide_index=True)
+
             # --- RELATÓRIO SOB DEMANDA (só é gerado ao tocar no botão) ---
             with area_relatorio:
-                chave_rel = (ativo_escolhido, range_api, limiar_zona, limiar_romp, janela_zona, str(df.index[-1]))
+                chave_rel = (ativo_escolhido, range_api, tuple(PARAMS.values()), tuple(BT.values()), str(df.index[-1]))
                 rel = st.session_state.get("relatorio")
                 c_rel1, c_rel2, c_rel3 = st.columns([1.2, 1, 1])
                 with c_rel1:
                     if st.button("📄 Gerar relatório de coerência", use_container_width=True):
                         with st.spinner("A montar o relatório..."):
                             html_rel = gerar_relatorio_html(ativo_escolhido, opcao_periodo, df, PARAMS,
-                                                            resumir_validacao(ev, base), sinais_k, fig_ativo)
+                                                            resumir_validacao(ev, base), sinais_k, fig_ativo,
+                                                            tab_bt, ops_r, BT_CFG)
                             rel = {"chave": chave_rel, "html": html_rel.encode("utf-8"), "csv": exportar_csv(df)}
                             st.session_state["relatorio"] = rel
                 if rel and rel["chave"] == chave_rel:
