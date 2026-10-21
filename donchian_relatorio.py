@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from donchian_core import SINAL_C, SINAL_V, ROMP_A, ROMP_B, HORIZONTES, status_zona
+from donchian_core import SINAL_C, SINAL_V, ROMP_A, ROMP_B, HORIZONTES, INTERVALOS, rotulo_h, status_zona
 
 OK, ATENCAO, FALHA = "✅", "⚠️", "❌"
 WHIPSAW_CANDLES = 24   # cruzamento desfeito em até 2h = sinal falso (whipsaw)
@@ -237,12 +237,17 @@ def _tab(df):
     return f"<div class='tw'>{df.to_html(index=False, escape=True, border=0, na_rep='—')}</div>"
 
 
-def gerar_relatorio_html(ticker, periodo, df, params, ev_resumo, sinais_k=None, fig=None, bt_tab=None, bt_ops=None, bt_cfg=""):
+def gerar_relatorio_html(ticker, periodo, df, params, ev_resumo, sinais_k=None, fig=None, bt_tab=None, bt_ops=None, bt_cfg="", intervalo="5m"):
+    minutos = INTERVALOS.get(intervalo, 5)
     agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
     dados = checar_dados(df)
     coer, estado = checar_coerencia(df, params["janela_zona"])
     estados, resumo = distribuicoes(df)
-    kchk, ktab = checar_kronos(ticker, df, sinais_k)
+    if intervalo == "5m":
+        kchk, ktab = checar_kronos(ticker, df, sinais_k)
+    else:
+        kchk, ktab = pd.DataFrame([{"": OK, "Verificação": "Previsão Kronos",
+                                    "Detalhe": f"não se aplica: o Kronos prevê candles de 5 min e este relatório usa {minutos} min"}]), pd.DataFrame()
     todos = pd.concat([dados, coer, kchk], ignore_index=True)
     cont = todos[""].value_counts()
 
@@ -266,7 +271,7 @@ def gerar_relatorio_html(ticker, periodo, df, params, ev_resumo, sinais_k=None, 
     p = params
     corpo = f"""
 <h1>Relatório de coerência — {html.escape(ticker)}</h1>
-<p class='mut'>Gerado em {agora:%d/%m/%Y %H:%M} · histórico {html.escape(periodo)} em 5 min · Donchian 305 · MA 500/610 ·
+<p class='mut'>Gerado em {agora:%d/%m/%Y %H:%M} · histórico {html.escape(periodo)} em {minutos} min · Donchian 305 · MA 500/610 ·
 zona &lt; {p['limiar_zona']:.2f} · rompimento &gt; {p['limiar_romp']:.2f} · janela {p['janela_zona']} candles</p>
 <div class='kpis'>
 <div class='kpi'><span class='mut'>Verificações OK</span><b>{cont.get(OK, 0)} {OK}</b></div>
@@ -281,7 +286,7 @@ zona &lt; {p['limiar_zona']:.2f} · rompimento &gt; {p['limiar_romp']:.2f} · ja
 <h2>4. Distribuição do tempo</h2>{_tab(estados)}{_tab(resumo)}
 <h2>5. Validação dos sinais × entrada aleatória</h2>
 <p class='nota'>Retorno e movimento máximo medidos no sentido do sinal, a partir do fecho do candle do evento. <b>Vantagem</b> &gt; 0 = o evento supera
-uma entrada aleatória no mesmo sentido. {ATENCAO} = menos de 20 ocorrências (pouco confiável). Horizontes: {', '.join(f'{h} candles ({n})' for h, n in HORIZONTES.items())}.</p>
+uma entrada aleatória no mesmo sentido. {ATENCAO} = menos de 20 ocorrências (pouco confiável). Horizontes: {', '.join(f'{h} candles ({rotulo_h(h, minutos)})' for h in HORIZONTES)}.</p>
 {_tab(val)}
 <h2>6. Backtest por operação (sem alvo)</h2>
 <p class='nota'>Sinal lido no fecho, execução na abertura do candle seguinte; stops de canal executados no próprio candle (com gap, na abertura). {html.escape(bt_cfg)}. A lista de operações é da estratégia em destaque.</p>

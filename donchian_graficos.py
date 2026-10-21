@@ -10,7 +10,7 @@ COR = dict(alta="#26a69a", baixa="#ef5350", mid="#ff9800", ma500="#2962ff", ma61
 
 
 def _rangebreaks(idx):
-    """Esconde noites e fins de semana para os candles de 5m ficarem colados."""
+    """Esconde noites e fins de semana para os candles intradiários ficarem colados."""
     t = idx.hour + idx.minute / 60
     ini, fim = float(t.min()), float(t.max()) + 5 / 60
     rb = [dict(bounds=["sat", "mon"])]
