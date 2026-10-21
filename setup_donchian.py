@@ -35,14 +35,14 @@ ativo_escolhido = st.sidebar.selectbox("Selecione o Ativo para Análise Detalhad
 
 intervalo = st.sidebar.radio("Tempo gráfico:", options=list(INTERVALOS), horizontal=True,
                              format_func=lambda i: f"{INTERVALOS[i]} min",
-                             help="15 min traz mais histórico. Os períodos dos indicadores (305, 500, 610) e os horizontes "
-                                  "continuam em número de candles, então cobrem 3× mais tempo.")
+                             help="A brapi limita o intradiário de 5 e 15 min a ~60 dias; 60 min costuma ter bem mais histórico. "
+                                  "Os períodos dos indicadores (305, 500, 610) e os horizontes continuam em número de candles.")
 MINUTOS = INTERVALOS[intervalo]
 
 opcao_periodo = st.sidebar.selectbox(
     f"Quantidade de Histórico ({MINUTOS} min):",
-    options=["1 Mês", "3 Meses", "6 Meses", "1 Ano"],
-    index=1 if intervalo == "5m" else 2,
+    options=["1 Mês", "3 Meses", "6 Meses", "1 Ano", "2 Anos"],
+    index={"5m": 1, "15m": 2}.get(intervalo, 4),
     help="A brapi limita o histórico intradiário; o app mostra o período que realmente veio."
 )
 
@@ -50,7 +50,8 @@ mapa_periodos = {
     "1 Mês": "1mo",
     "3 Meses": "3mo",
     "6 Meses": "6mo",
-    "1 Ano": "1y"
+    "1 Ano": "1y",
+    "2 Anos": "2y"
 }
 range_api = mapa_periodos[opcao_periodo]
 

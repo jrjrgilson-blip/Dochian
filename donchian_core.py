@@ -19,7 +19,7 @@ ROMP_B = "🩸 ROMPIMENTO BAIXA"
 
 # Horizontes da validação, em candles de 5 minutos
 HORIZONTES = {12: "1h", 48: "4h", 96: "~1 pregão"}   # rótulos em 5 min; use rotulo_h para outros intervalos
-INTERVALOS = {"5m": 5, "15m": 15}
+INTERVALOS = {"5m": 5, "15m": 15, "60m": 60}
 
 
 def rotulo_h(h, minutos=5):
