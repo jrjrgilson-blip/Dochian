@@ -11,6 +11,7 @@ for _m in (donchian_core, donchian_graficos, donchian_backtest, donchian_relator
     importlib.reload(_m)
 
 from donchian_core import (WATCHLIST_B3, SINAL_C, SINAL_V, HORIZONTES, INTERVALOS, rotulo_h, carregar_brapi,
+                           carregar_historico, juntar, reamostrar,
                            processar_indicadores, status_zona, resultados_eventos, resumir_validacao)
 from donchian_graficos import grafico_ativo, grafico_validacao, grafico_curvas
 from donchian_backtest import ESTRATEGIAS, backtest, resumo, curva_capital
@@ -54,6 +55,9 @@ mapa_periodos = {
     "2 Anos": "2y"
 }
 range_api = mapa_periodos[opcao_periodo]
+usar_hist = st.sidebar.checkbox("Usar histórico acumulado no repositório", value=True,
+                                help="Candles de 5 min guardados todo dia pelo GitHub Actions + os mais recentes da brapi. "
+                                     "15 e 60 min são montados a partir dos 5 min. Desligado = só o que a brapi entrega (~60 dias).")
 
 st.sidebar.divider()
 st.sidebar.subheader("⚖️ Zona de indecisão & rompimento")
@@ -99,6 +103,24 @@ CAPTION_BT = ("**Rompimento:** entra na abertura seguinte ao ★ e sai quando o 
 @st.cache_data(ttl=300)
 def carregar_dados_ativo(ticker, range_val, token, interval="5m"):
     return carregar_brapi(ticker, range_val, token, interval)
+
+
+@st.cache_data(ttl=600)
+def carregar_hist_local(ticker):
+    return carregar_historico(ticker)
+
+
+MESES = {"1mo": 1, "3mo": 3, "6mo": 6, "1y": 12, "2y": 24}
+
+
+def obter_dados(ticker):
+    if not usar_hist:
+        return carregar_dados_ativo(ticker, range_api, BRAPI_TOKEN, intervalo)
+    df = juntar(carregar_hist_local(ticker), carregar_dados_ativo(ticker, "1mo", BRAPI_TOKEN, "5m"))
+    if df.empty:
+        return df
+    df = df[df.index >= df.index[-1] - pd.DateOffset(months=MESES[range_api])]
+    return reamostrar(df, MINUTOS)
 
 
 @st.cache_data(ttl=600)
@@ -158,7 +180,7 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
 
     with st.spinner("A processar indicadores de toda a watchlist..."):
         for ticker in WATCHLIST_B3:
-            df_temp = carregar_dados_ativo(ticker, range_val=range_api, token=BRAPI_TOKEN, interval=intervalo)
+            df_temp = obter_dados(ticker)
             if not df_temp.empty and len(df_temp) >= 610:
                 df_proc = processar_indicadores(df_temp, **PARAMS)
                 if df_proc is not None:
@@ -228,10 +250,10 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
 else:
     st.markdown(f"### 📈 Análise Detalhada & Eventos: **{ativo_escolhido}**")
 
-    df = carregar_dados_ativo(ativo_escolhido, range_api, BRAPI_TOKEN, intervalo)
+    df = obter_dados(ativo_escolhido)
 
     if not df.empty:
-        st.info(f"📊 Foram processados **{len(df)}** candles de {MINUTOS} minutos (Período: {df.index[0].strftime('%d/%m/%Y')} até {df.index[-1].strftime('%d/%m/%Y %H:%M')}).")
+        st.info(f"📊 Foram processados **{len(df)}** candles de {MINUTOS} minutos{' do histórico acumulado + brapi' if usar_hist else ' da brapi'} (Período: {df.index[0].strftime('%d/%m/%Y')} até {df.index[-1].strftime('%d/%m/%Y %H:%M')}).")
 
         if len(df) < 610:
             st.warning(f"⚠️ Atenção: O histórico tem apenas {len(df)} velas. A média de 610 precisa de mais dados.")
@@ -324,7 +346,7 @@ else:
 
             # --- RELATÓRIO SOB DEMANDA (só é gerado ao tocar no botão) ---
             with area_relatorio:
-                chave_rel = (ativo_escolhido, range_api, intervalo, tuple(PARAMS.values()), tuple(BT.values()), str(df.index[-1]))
+                chave_rel = (ativo_escolhido, range_api, intervalo, usar_hist, tuple(PARAMS.values()), tuple(BT.values()), str(df.index[-1]))
                 rel = st.session_state.get("relatorio")
                 c_rel1, c_rel2, c_rel3 = st.columns([1.2, 1, 1])
                 with c_rel1:

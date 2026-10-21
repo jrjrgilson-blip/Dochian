@@ -1,0 +1,38 @@
+name: Histórico intradiário
+
+on:
+  schedule:
+    - cron: "43 21 * * 1-5"   # 18:43 de Brasília, após o fecho, em dias úteis
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: grava-dados       # não grava ao mesmo tempo que outro job de dados
+  cancel-in-progress: false
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas numpy requests
+      - name: Coletar candles de 5 min
+        env:
+          BRAPI_TOKEN: ${{ secrets.BRAPI_TOKEN }}
+        run: python historico_job.py
+      - name: Gravar no repositório
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898279+github-actions[bot]@users.noreply.github.com"
+          cp -r data/historico "$RUNNER_TEMP/hist"
+          git fetch origin main
+          git reset --hard origin/main
+          mkdir -p data/historico && cp -r "$RUNNER_TEMP/hist/." data/historico/
+          git add data/historico
+          git diff --cached --quiet || (git commit -m "Histórico 5m: $(date -u +%F)" && git push origin HEAD:main)
