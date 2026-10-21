@@ -2,6 +2,8 @@
 
 Sem dependência de Streamlit, para ser usada pelo app e pelo job do Kronos (GitHub Actions).
 """
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import requests
@@ -20,6 +22,39 @@ ROMP_B = "🩸 ROMPIMENTO BAIXA"
 # Horizontes da validação, em candles de 5 minutos
 HORIZONTES = {12: "1h", 48: "4h", 96: "~1 pregão"}   # rótulos em 5 min; use rotulo_h para outros intervalos
 INTERVALOS = {"5m": 5, "15m": 15, "60m": 60}
+HIST_DIR = Path(__file__).parent / "data" / "historico" / "5m"
+COLS_HIST = ["Open", "High", "Low", "Close", "Volume"]
+
+
+def carregar_historico(ticker):
+    """Candles de 5 min acumulados pelo historico_job.py (vazio se ainda não houver)."""
+    arqs = sorted((HIST_DIR / ticker).glob("*.csv"))
+    if not arqs:
+        return pd.DataFrame(columns=COLS_HIST)
+    df = pd.concat(pd.read_csv(a, parse_dates=["Date"], index_col="Date") for a in arqs)
+    return df[~df.index.duplicated(keep="last")].sort_index()
+
+
+def juntar(historico, recente):
+    """Histórico local + dados recentes da brapi; em horários repetidos vale o mais recente."""
+    if historico is None or historico.empty:
+        return recente
+    if recente is None or recente.empty:
+        return historico
+    df = pd.concat([historico[COLS_HIST], recente[COLS_HIST]])
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    df.attrs.update(recente.attrs)
+    return df
+
+
+def reamostrar(df, minutos):
+    """Agrega candles de 5 min em 15/60 min, por pregão (não mistura dias)."""
+    if minutos == 5 or df.empty:
+        return df
+    regra = {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}
+    out = df[COLS_HIST].resample(f"{minutos}min", label="left", closed="left").agg(regra).dropna(subset=["Close"])
+    out.attrs.update(df.attrs)
+    return out
 
 
 def rotulo_h(h, minutos=5):

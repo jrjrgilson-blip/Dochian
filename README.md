@@ -56,3 +56,12 @@ Na barra lateral dá para ajustar:
 - na Análise Individual, com a curva e a lista de operações;
 - no Scanner, uma linha por ativo mais o total;
 - no relatório.
+
+## Histórico intradiário acumulado
+A brapi só entrega uns 60 dias de dados em 5, 15 ou 60 min. Por isso, o workflow `.github/workflows/historico.yml` roda o `historico_job.py` em dias úteis às 18:43 e guarda os candles de 5 min da watchlist em `data/historico/5m/<ATIVO>/<AAAA-MM>.csv`.
+
+Com **Usar histórico acumulado** ligado, o app:
+- junta esse acervo com os dados mais recentes da brapi;
+- monta os candles de 15 e 60 min a partir dos de 5 min.
+
+O histórico cresce um pregão por dia.
