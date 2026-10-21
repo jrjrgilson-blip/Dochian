@@ -18,7 +18,17 @@ ROMP_A = "🚀 ROMPIMENTO ALTA"
 ROMP_B = "🩸 ROMPIMENTO BAIXA"
 
 # Horizontes da validação, em candles de 5 minutos
-HORIZONTES = {12: "1h", 48: "4h", 96: "~1 pregão"}
+HORIZONTES = {12: "1h", 48: "4h", 96: "~1 pregão"}   # rótulos em 5 min; use rotulo_h para outros intervalos
+INTERVALOS = {"5m": 5, "15m": 15}
+
+
+def rotulo_h(h, minutos=5):
+    """Duração de h candles: horas até 6h, senão pregões (~7h de pregão)."""
+    t = h * minutos
+    if t <= 360:
+        return f"{t / 60:g}h"
+    p = t / 420
+    return "~1 pregão" if p < 1.5 else f"~{p:.1f} pregões".replace(".", ",")
 
 
 def carregar_brapi(ticker, range_val, token, interval="5m"):
@@ -174,7 +184,7 @@ def resultados_eventos(df, horizontes=HORIZONTES, ticker=""):
     return pd.DataFrame(ev, columns=cols), pd.DataFrame(base)
 
 
-def resumir_validacao(ev, base):
+def resumir_validacao(ev, base, minutos=5):
     """Tabela por evento × horizonte comparada à entrada aleatória no mesmo sentido."""
     if ev.empty:
         return pd.DataFrame()
@@ -189,7 +199,7 @@ def resumir_validacao(ev, base):
     g = g.sort_values(["h", "_o"])
     return pd.DataFrame({
         "Evento": g.evento,
-        "Horizonte": g.h.map(lambda h: f"{h} candles ({HORIZONTES.get(h, '')})"),
+        "Horizonte": g.h.map(lambda h: f"{h} candles ({rotulo_h(h, minutos)})"),
         "h": g.h,
         "N": g.N,
         "Acerto (%)": g.acerto.round(0),

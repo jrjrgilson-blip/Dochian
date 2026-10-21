@@ -10,7 +10,7 @@ import donchian_core, donchian_graficos, donchian_backtest, donchian_relatorio
 for _m in (donchian_core, donchian_graficos, donchian_backtest, donchian_relatorio):
     importlib.reload(_m)
 
-from donchian_core import (WATCHLIST_B3, SINAL_C, SINAL_V, HORIZONTES, carregar_brapi,
+from donchian_core import (WATCHLIST_B3, SINAL_C, SINAL_V, HORIZONTES, INTERVALOS, rotulo_h, carregar_brapi,
                            processar_indicadores, status_zona, resultados_eventos, resumir_validacao)
 from donchian_graficos import grafico_ativo, grafico_validacao, grafico_curvas
 from donchian_backtest import ESTRATEGIAS, backtest, resumo, curva_capital
@@ -33,16 +33,24 @@ modo_visao = st.sidebar.radio("Modo de Operação:", options=["📊 Scanner Gera
 
 ativo_escolhido = st.sidebar.selectbox("Selecione o Ativo para Análise Detalhada:", options=WATCHLIST_B3, index=0)
 
+intervalo = st.sidebar.radio("Tempo gráfico:", options=list(INTERVALOS), horizontal=True,
+                             format_func=lambda i: f"{INTERVALOS[i]} min",
+                             help="15 min traz mais histórico. Os períodos dos indicadores (305, 500, 610) e os horizontes "
+                                  "continuam em número de candles, então cobrem 3× mais tempo.")
+MINUTOS = INTERVALOS[intervalo]
+
 opcao_periodo = st.sidebar.selectbox(
-    "Quantidade de Histórico (5m):",
-    options=["1 Mês", "3 Meses", "6 Meses (Máximo API)"],
-    index=1
+    f"Quantidade de Histórico ({MINUTOS} min):",
+    options=["1 Mês", "3 Meses", "6 Meses", "1 Ano"],
+    index=1 if intervalo == "5m" else 2,
+    help="A brapi limita o histórico intradiário; o app mostra o período que realmente veio."
 )
 
 mapa_periodos = {
     "1 Mês": "1mo",
     "3 Meses": "3mo",
-    "6 Meses (Máximo API)": "6mo"
+    "6 Meses": "6mo",
+    "1 Ano": "1y"
 }
 range_api = mapa_periodos[opcao_periodo]
 
@@ -55,7 +63,7 @@ if limiar_romp <= limiar_zona:
     st.sidebar.warning("O limiar de rompimento deve ser maior que o da zona.")
 n_grafico = st.sidebar.slider("Candles no gráfico", 300, 6000, 1500, 100)
 horizonte_sel = st.sidebar.selectbox("Horizonte da validação", options=list(HORIZONTES), index=1,
-                                     format_func=lambda h: f"{h} candles ({HORIZONTES[h]})")
+                                     format_func=lambda h: f"{h} candles ({rotulo_h(h, MINUTOS)})")
 janela_incl = st.sidebar.slider("Dinâmica do canal: inclinação medida em N candles", 5, 150, 10, 5,
                                 help="10 = comportamento original. Com 305 candles de canal, 50–100 dá uma leitura menos 'Lateral'.")
 
@@ -88,8 +96,8 @@ CAPTION_BT = ("**Rompimento:** entra na abertura seguinte ao ★ e sai quando o 
 
 
 @st.cache_data(ttl=300)
-def carregar_dados_ativo(ticker, range_val, token):
-    return carregar_brapi(ticker, range_val, token)
+def carregar_dados_ativo(ticker, range_val, token, interval="5m"):
+    return carregar_brapi(ticker, range_val, token, interval)
 
 
 @st.cache_data(ttl=600)
@@ -105,6 +113,8 @@ def carregar_kronos():
 
 
 sinais_k, prev_k = carregar_kronos()
+if intervalo != "5m":   # o Kronos prevê candles de 5 min; não mistura com outro tempo gráfico
+    sinais_k = prev_k = None
 
 
 def colunas_kronos(ticker, zona_txt):
@@ -120,7 +130,7 @@ def colunas_kronos(ticker, zona_txt):
 
 
 def mostrar_validacao(ev, base, titulo):
-    res = resumir_validacao(ev, base)
+    res = resumir_validacao(ev, base, MINUTOS)
     if res.empty:
         st.info("Nenhum evento com horizonte completo para validar neste período.")
         return
@@ -147,7 +157,7 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
 
     with st.spinner("A processar indicadores de toda a watchlist..."):
         for ticker in WATCHLIST_B3:
-            df_temp = carregar_dados_ativo(ticker, range_val=range_api, token=BRAPI_TOKEN)
+            df_temp = carregar_dados_ativo(ticker, range_val=range_api, token=BRAPI_TOKEN, interval=intervalo)
             if not df_temp.empty and len(df_temp) >= 610:
                 df_proc = processar_indicadores(df_temp, **PARAMS)
                 if df_proc is not None:
@@ -187,6 +197,8 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
         df_ranking = pd.DataFrame(resultados_scanner)
         df_ranking = df_ranking.sort_values(by="Ativo", ascending=True)
         st.dataframe(df_ranking, use_container_width=True, height=500, hide_index=True)
+        if intervalo != "5m":
+            st.caption("🤖 Colunas do Kronos ocultas: as previsões são de candles de 5 min.")
         if sinais_k is not None:
             st.caption(f"🤖 Kronos gerado em {sinais_k.gerado_em.iloc[0]} — previsão dos próximos "
                        f"{int(sinais_k.pred_len.iloc[0])} candles. *Amplitude ÷ ATR* > 1 = mais volatilidade que o normal.")
@@ -215,10 +227,10 @@ if modo_visao == "📊 Scanner Geral (Ranking)":
 else:
     st.markdown(f"### 📈 Análise Detalhada & Eventos: **{ativo_escolhido}**")
 
-    df = carregar_dados_ativo(ativo_escolhido, range_api, BRAPI_TOKEN)
+    df = carregar_dados_ativo(ativo_escolhido, range_api, BRAPI_TOKEN, intervalo)
 
     if not df.empty:
-        st.info(f"📊 Foram processados **{len(df)}** candles de 5 minutos (Período: {df.index[0].strftime('%d/%m/%Y')} até {df.index[-1].strftime('%d/%m/%Y %H:%M')}).")
+        st.info(f"📊 Foram processados **{len(df)}** candles de {MINUTOS} minutos (Período: {df.index[0].strftime('%d/%m/%Y')} até {df.index[-1].strftime('%d/%m/%Y %H:%M')}).")
 
         if len(df) < 610:
             st.warning(f"⚠️ Atenção: O histórico tem apenas {len(df)} velas. A média de 610 precisa de mais dados.")
@@ -311,19 +323,19 @@ else:
 
             # --- RELATÓRIO SOB DEMANDA (só é gerado ao tocar no botão) ---
             with area_relatorio:
-                chave_rel = (ativo_escolhido, range_api, tuple(PARAMS.values()), tuple(BT.values()), str(df.index[-1]))
+                chave_rel = (ativo_escolhido, range_api, intervalo, tuple(PARAMS.values()), tuple(BT.values()), str(df.index[-1]))
                 rel = st.session_state.get("relatorio")
                 c_rel1, c_rel2, c_rel3 = st.columns([1.2, 1, 1])
                 with c_rel1:
                     if st.button("📄 Gerar relatório de coerência", use_container_width=True):
                         with st.spinner("A montar o relatório..."):
                             html_rel = gerar_relatorio_html(ativo_escolhido, opcao_periodo, df, PARAMS,
-                                                            resumir_validacao(ev, base), sinais_k, fig_ativo,
-                                                            tab_bt, ops_r, BT_CFG)
+                                                            resumir_validacao(ev, base, MINUTOS), sinais_k, fig_ativo,
+                                                            tab_bt, ops_r, BT_CFG, intervalo)
                             rel = {"chave": chave_rel, "html": html_rel.encode("utf-8"), "csv": exportar_csv(df)}
                             st.session_state["relatorio"] = rel
                 if rel and rel["chave"] == chave_rel:
-                    nome = f"relatorio_{ativo_escolhido}_{df.index[-1]:%Y%m%d_%H%M}"
+                    nome = f"relatorio_{ativo_escolhido}_{intervalo}_{df.index[-1]:%Y%m%d_%H%M}"
                     with c_rel2:
                         st.download_button("⬇️ Relatório (HTML)", rel["html"], f"{nome}.html", "text/html", use_container_width=True)
                     with c_rel3:
